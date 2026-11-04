@@ -35,7 +35,7 @@ starful-hq/
     static/            admin.css · office/ (floor-*.svg · floor-front-*.svg · nav-*.json)
   data/                런타임 (아래 4장)
   tests/               17개 파일 · 104개 테스트
-  .bak/                작업 전 백업 (b1-20261028 · krcare-before-pr17 · money-ui-20261104 …)
+  .bak/                예전 수동 백업 (git 이전, 추적 안 함)
 ```
 
 ## 3. 사이트 레지스트리 (`sites.yaml`)
@@ -183,7 +183,8 @@ content 타입별 쓰기·리서치·slug·레이아웃. UI seed/topics는 kit�
 
 ## 13. 개발 규칙
 
-- 작업 전 `.bak/<이름-날짜>/`에 백업
+- 버전 관리: git `https://github.com/starful/starful-hq` (main). 작업 전 백업 대신 커밋. `data/` · `.bak/` · `__pycache__/` · `.env`는 추적 안 함 (`.gitignore`)
+- 자동 진행(PR·배포) 대상이 아님 — HQ는 Mac 로컬에서만 돎
 - 서버 재시작 = 돌던 잡 끊김. 큰 수정은 잡이 없을 때
 - 자동 생성 파일(.pyc 등)은 변경으로 치지 않음
 - 화면은 자동 리로드하지 않음: 지도·「지금 하는 일」은 폴링, 서버 HTML은 「끝난 일이 있어요 · 화면 새로고침」배너만(짧은 잡 연속 완료에 토스트 없음)
