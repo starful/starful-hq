@@ -1,0 +1,76 @@
+{# 회의 버튼. 전사·사장실은 선택(radio)하면 주제 칸이 열림. Needs: meet_on, free_*, boss_on, office_sites, cur_*, jobs, office. #}
+{% from "_chibi.html" import chibi %}
+{# 현황 탭 = 전체 회의 열기. 결과는 회의 탭. 팀 회의는 각 팀 탭. #}
+{% set meets = [
+    ("all", "👥", "전사 회의", cur_office.name ~ " 사이트 전부 · 쉬는 사람", free_people | length, 2, True),
+    ("leaders", "🧑‍💼", "리더 회의", "회의실 B · 리더 4명", free_leaders | length, 2, False),
+    ("boss", "📣", "사장실 호출", "CEO · 리더 최대 5명", free_leaders | length, 1, True),
+] %}
+<form method="post" action="{{ url_for('site_meeting') }}" class="meet-block" id="meet-block">
+    <div class="meet-grid">
+    {% for mode, icon, label, where, n, need, has_opts in meets %}
+    {% set on = meet_on[mode] if mode != 'boss' else boss_on %}
+    {% set blocked = on or n < need %}
+    {% if has_opts %}
+    <input class="meet-pick" type="radio" name="meet_pick" id="meet-pick-{{ mode }}" value="{{ mode }}"{% if blocked %} disabled{% endif %} hidden>
+    <label class="meet-btn m-{{ mode }}" for="meet-pick-{{ mode }}" data-track="ui:meet:{{ mode }}" title="{{ where }}{% if blocked %} · {% if on %}회의 중{% else %}모일 사람 없음{% endif %}{% endif %}"{% if blocked %} aria-disabled="true"{% endif %}>
+        <span class="mi">{{ icon }}</span><b>{{ label }}</b>
+        <small>{% if on %}회의 중…{% elif n < need %}모일 사람 없음{% else %}누르면 주제{% endif %}</small>
+    </label>
+    {% else %}
+    <button class="meet-btn m-{{ mode }}" type="submit" name="mode" value="{{ mode }}" data-track="ui:meet:{{ mode }}" title="{{ where }}"{% if blocked %} disabled{% endif %}>
+        <span class="mi">{{ icon }}</span><b>{{ label }}</b>
+        <small>{% if on %}회의 중…{% elif n < need %}모일 사람 없음{% else %}{{ n }}명{% endif %}</small>
+    </button>
+    {% endif %}
+    {% endfor %}
+    </div>
+
+    <div class="meet-opts" data-opts="all">
+        <label class="meet-aside">
+            <span>전사 참고 주제 <small>(선택 · 메인은 오피스 전체)</small></span>
+            <input type="text" name="all_topic" placeholder="예: 어필리 전환, 저CTR 글…" maxlength="200" autocomplete="off" disabled>
+        </label>
+        <button class="act meet-go" type="submit" name="mode" value="all" data-track="ui:meet:all-go" disabled>전사 회의 시작</button>
+    </div>
+
+    <div class="meet-opts boss" data-opts="boss">
+        <span class="summon-faces" title="리더를 사장실로">{% for r in office.roster if r.lead %}<span class="face{% if r.id in jobs and jobs[r.id].running %} busy{% endif %}">{{ chibi(r, face=True) }}</span>{% endfor %}</span>
+        {% if office_sites | length > 1 %}
+        <select name="site" class="summon-site" title="어느 사이트 이야기를 할까요" disabled>
+            {% for s in office_sites %}<option value="{{ s.id }}"{% if s.id == cur_site.id %} selected{% endif %}>{{ s.label }}</option>{% endfor %}
+        </select>
+        {% endif %}
+        <input type="text" name="topic" placeholder="사장실 호출 주제 (선택 · 비우면 전체)" maxlength="200" autocomplete="off" disabled>
+        <button class="act boss-btn meet-go" type="submit" name="mode" value="boss" data-track="ui:meet:boss-go"{% if boss_on %} data-locked="1" disabled{% endif %}>사장실로 호출</button>
+    </div>
+</form>
+<script>
+(function () {
+    const block = document.getElementById("meet-block");
+    if (!block) return;
+    function sync() {
+        const pick = (block.querySelector(".meet-pick:checked") || {}).value || "";
+        block.querySelectorAll(".meet-opts").forEach((p) => {
+            const on = p.dataset.opts === pick;
+            p.classList.toggle("open", on);
+            p.querySelectorAll("input[type=text], select").forEach((el) => { el.disabled = !on; });
+            const go = p.querySelector(".meet-go");
+            if (go) go.disabled = !on || go.dataset.locked === "1";
+            if (on) {
+                const input = p.querySelector("input[type=text]");
+                if (input) setTimeout(() => input.focus(), 0);
+            }
+        });
+        block.querySelectorAll("label.meet-btn").forEach((lab) => {
+            const r = document.getElementById(lab.getAttribute("for") || "");
+            lab.classList.toggle("picked", !!(r && r.checked));
+        });
+    }
+    block.querySelectorAll(".meet-pick").forEach((r) => r.addEventListener("change", sync));
+    block.querySelectorAll("label.meet-btn[aria-disabled=true]").forEach((lab) => {
+        lab.addEventListener("click", (ev) => ev.preventDefault());
+    });
+    sync();
+})();
+</script>

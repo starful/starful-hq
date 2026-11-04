@@ -1,0 +1,4 @@
+{# A site's favicon (its name on hover). Needs: all_sites (app context). #}
+{% macro sico(sid, cls="") -%}
+{% if sid and sid in all_sites %}<img class="site-ico {{ cls }}" src="{{ url_for('site_icon', sid=sid) }}" alt="{{ all_sites[sid].label }}" title="{{ all_sites[sid].label }}" width="16" height="16" loading="lazy">{% endif %}
+{%- endmacro %}

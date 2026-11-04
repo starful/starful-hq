@@ -1,0 +1,139 @@
+{# GA4 home-style chart + GSC queries. Needs: traffic (marketing.traffic_card()). #}
+{% set g = traffic.ga4 or {} %}
+{% set s = traffic.gsc or {} %}
+<section class="ss-block traffic-card" id="traffic-card" data-url="{{ url_for('site_analytics_card') }}">
+    <p class="ss-title">📊 트래픽 · 검색
+        <small>{{ traffic.site_label }} · {{ traffic.period }}{% if g.start and g.end %} · {{ g.start[5:] }}~{{ g.end[5:] }}{% endif %}{% if traffic.cache_hit and traffic.prior_cached %} · 캐시{% elif traffic.cache_hit %} · 캐시(이전 기간 갱신){% elif traffic.prior_cached %} · 이전 기간 캐시{% endif %}</small>
+        <button type="button" class="act ghost small traffic-refresh" data-track="ui:traffic-refresh" title="GA4·GSC 다시 받기">↻</button>
+    </p>
+
+    {% if g.ok %}
+    <div class="ga4-home" data-ga4-home>
+        <div class="ga4-tabs" role="tablist">
+            {% for k in g.kpis %}
+            <button type="button" class="ga4-tab{% if loop.first %} on{% endif %}" role="tab" data-metric="{{ k.id }}" aria-selected="{{ 'true' if loop.first else 'false' }}">
+                <em>{{ k.label }}</em>
+                <b>{{ k.value }}</b>
+                {% if k.pct %}<i class="{{ 'up' if k.up else 'down' }}">{{ k.pct }}</i>{% endif %}
+            </button>
+            {% endfor %}
+        </div>
+        <div class="traffic-chart-wrap"><canvas id="hq-ga4-chart" height="160"></canvas></div>
+        <p class="ga4-legend"><span class="cur">—— 지난 {{ traffic.days }}일</span>{% if g.prior_rows %} <span class="prev">- - 이전 기간</span>{% endif %}</p>
+        <script type="application/json" id="hq-ga4-data">{{ {"rows": g.rows, "prior": g.prior_rows, "metric": "users"} | tojson }}</script>
+    </div>
+    {% elif g.error %}
+    <p class="hint warn">GA4: {{ g.error }}</p>
+    {% else %}
+    <p class="hint">GA4 데이터가 없어요. ↻로 다시 받아 보세요.</p>
+    {% endif %}
+
+    <div class="traffic-gsc">
+        <p class="traffic-q-title">GSC 검색어
+            <small>{% if s.clicks %}클릭 {{ '{:,}'.format(s.clicks) }}{% if s.d_clicks %} <i class="{{ 'up' if s.d_clicks.up else 'down' }}">{{ s.d_clicks.pct }}</i>{% endif %} · {% endif %}노출 많은 순</small>
+        </p>
+        {% if s.error and not s.queries %}<p class="hint warn">GSC: {{ s.error }}</p>
+        {% elif s.queries %}
+        <div class="traffic-q-scroll">
+            <table class="traffic-q">
+                <thead><tr><th>검색어</th><th>클릭</th><th>노출</th><th>CTR</th><th>순위</th></tr></thead>
+                <tbody>
+                {% for q in s.queries %}
+                <tr><td title="{{ q.query }}">{{ q.query }}</td><td>{{ '{:,}'.format(q.clicks) }}</td><td>{{ '{:,}'.format(q.impressions) }}</td><td>{{ '%.1f'|format(q.ctr * 100) }}%</td><td>{{ '%.1f'|format(q.position) }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}<p class="hint">검색어가 없어요.</p>{% endif %}
+    </div>
+</section>
+<script>
+(function () {
+    const root = document.querySelector("[data-ga4-home]");
+    const rowsEl = document.getElementById("hq-ga4-data");
+    const canvas = document.getElementById("hq-ga4-chart");
+    if (!root || !rowsEl || !canvas) return;
+    let payload = {};
+    try { payload = JSON.parse(rowsEl.textContent || "{}"); } catch (_) { return; }
+    const rows = payload.rows || [];
+    const prior = payload.prior || [];
+    if (!rows.length) return;
+    let metric = "users";
+
+    function series(list, key) {
+        return list.map((r) => {
+            if (key === "engagement") return Math.round((r.engagement || 0) * 1000) / 10; // %
+            return r[key] || 0;
+        });
+    }
+    function labels() {
+        return rows.map((r) => {
+            const d = String(r.date || "");
+            if (d.length === 8) return d.slice(4, 6) + "/" + d.slice(6); // MMDD → MM/DD
+            return d.slice(5);
+        });
+    }
+    function paint() {
+        if (canvas._hqChart) { try { canvas._hqChart.destroy(); } catch (_) {} }
+        const ds = [{
+            label: "지난 기간",
+            data: series(rows, metric),
+            borderColor: "#1a73e8",
+            backgroundColor: "rgba(26,115,232,.08)",
+            tension: 0.3, pointRadius: 0, borderWidth: 2, fill: true,
+        }];
+        if (prior.length) {
+            // align prior by index (same length windows)
+            const cur = series(rows, metric);
+            const prev = series(prior, metric);
+            const aligned = cur.map((_, i) => prev[i] ?? null);
+            ds.push({
+                label: "이전 기간",
+                data: aligned,
+                borderColor: "#a8c7fa",
+                borderDash: [5, 4],
+                tension: 0.3, pointRadius: 0, borderWidth: 1.5, fill: false,
+            });
+        }
+        canvas._hqChart = new Chart(canvas, {
+            type: "line",
+            data: { labels: labels(), datasets: ds },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: "index", intersect: false },
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { ticks: { maxTicksLimit: 6, font: { size: 9 }, color: "#8a91a3" }, grid: { display: false } },
+                    y: {
+                        ticks: {
+                            font: { size: 9 }, color: "#8a91a3",
+                            callback: (v) => metric === "engagement" ? v + "%" : v,
+                        },
+                        grid: { color: "#eef0f4" }, beginAtZero: true,
+                    },
+                },
+            },
+        });
+    }
+    function setMetric(id) {
+        metric = id;
+        root.querySelectorAll(".ga4-tab").forEach((b) => {
+            const on = b.dataset.metric === id;
+            b.classList.toggle("on", on);
+            b.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        paint();
+    }
+    root.querySelectorAll(".ga4-tab").forEach((b) => b.addEventListener("click", () => setMetric(b.dataset.metric)));
+    function boot() {
+        if (window.Chart) paint();
+        else {
+            const s = document.createElement("script");
+            s.src = "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js";
+            s.onload = paint;
+            document.head.appendChild(s);
+        }
+    }
+    boot();
+})();
+</script>

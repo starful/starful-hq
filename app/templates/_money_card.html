@@ -1,0 +1,20 @@
+{# 어필리 + 비용·한도 in one bottom card (same height band as 한눈에 · 이벤트).
+   Panes keep #aff-card / #cost-card so fetch-swap JS still works. #}
+<div class="bottom-card money-card money-combo" id="money-card">
+    <header class="mc-head money-combo-head">
+        <span class="mc-title">어필리 · 비용</span>
+    </header>
+    <div class="money-split">
+        {% include "_affiliate_card.html" %}
+        {% if cost_cached.data %}
+        {% with cost=cost_cached.data, cost_at=cost_cached.at, cost_stale=cost_cached.stale %}
+        {% include "_costs_card.html" %}
+        {% endwith %}
+        {% else %}
+        <div class="money-pane cost-card" id="cost-card" data-cost-stale="1">
+            <header class="mp-top"><span class="mc-pane-label spend">💰 비용</span></header>
+            <p class="hint">읽는 중…</p>
+        </div>
+        {% endif %}
+    </div>
+</div>

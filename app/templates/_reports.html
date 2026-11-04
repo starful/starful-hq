@@ -1,0 +1,38 @@
+{# 리포트 popup: one day at a time. Needs: day, days, newer, older, day_analyses, day_meetings, counts #}
+{% from "_site_ico.html" import sico with context %}
+{% from "_ideas.html" import ideas with context %}
+<div class="rep">
+    <nav class="rep-days" aria-label="날짜">
+        <button type="button" class="rep-nav" data-date="{{ older }}"{% if not older %} disabled{% endif %} title="이전 날">◀</button>
+        <div class="rep-chips">
+            {% for d in days %}<button type="button" class="rep-day{% if d == day %} on{% endif %}" data-date="{{ d }}">{{ d[5:].replace('-', '/') }}<small>{{ counts[d] }}</small></button>{% endfor %}
+        </div>
+        <button type="button" class="rep-nav" data-date="{{ newer }}"{% if not newer %} disabled{% endif %} title="다음 날">▶</button>
+    </nav>
+    {% if not days %}<p class="hint">아직 리포트가 없어요.</p>{% endif %}
+
+    {% for m in day_meetings %}
+    <details class="rep-sec meet"{% if loop.first %} open{% endif %}>
+        <summary><h3>💡 {{ (m.mode_label or ('전사 회의' if m.meeting else '제안')).split(' (')[0] }}{% if m.office %} · {{ cur_office.name }} 전체{% endif %} <small>{{ m.at[11:16] }} · {{ m.focus_label }}</small></h3>
+        {% if m.headline %}<p class="rep-head">{{ m.headline }}</p>{% endif %}</summary>
+        {% if m.meeting %}
+        {{ ideas(m) }}
+        {% endif %}
+        <p class="rep-links"><a href="{{ url_for('site_proposal_file', pid=m.id) }}">.md 받기</a> · <a href="{{ url_for('site_meet', proposal=m.id) }}">자세히</a></p>
+    </details>
+    {% endfor %}
+
+    {% for a in day_analyses %}
+    <details class="rep-sec ana"{% if loop.first and not day_meetings %} open{% endif %}>
+        <summary><h3>📊 GA4·GSC 분석 <small>{{ a.at[11:16] }} · {{ a.period }}</small></h3>
+        {% if a.headline %}<p class="rep-head">{{ a.headline }}</p>{% endif %}</summary>
+        <ul class="numbers">
+            {% for n in a.numbers or [] %}<li><em>{{ n.src }} · {{ n.label }}</em><b>{{ n.value }}</b>{% if n.delta %}<span class="{{ 'up' if n.delta.startswith('+') else 'down' }}">{{ n.delta }}</span>{% endif %}</li>{% endfor %}
+        </ul>
+        {% if a.findings %}<h4>보인 것</h4><ul class="findings">{% for f in a.findings %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
+        {% if a.actions %}<h4>할 일</h4><ul class="findings">{% for x in a.actions %}<li><b>{{ x.team }}</b> {{ x.text }}</li>{% endfor %}</ul>{% endif %}
+        <p class="rep-links"><a href="{{ url_for('site_analysis_file', aid=a.id) }}">.md 받기</a> · <a href="{{ url_for('site_search', analysis=a.id) }}#d">자세히</a></p>
+    </details>
+    {% endfor %}
+    {% if days and not day_meetings and not day_analyses %}<p class="hint">이 날은 리포트가 없어요.</p>{% endif %}
+</div>

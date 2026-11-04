@@ -1,0 +1,50 @@
+{% from "_site_ico.html" import sico with context %}{% from "_chibi.html" import chibi %}<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='hq-icon.svg') }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='hq-icon-32.png') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='hq-icon-180.png') }}">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ office_info.floor_label }} {{ office_info.name }} · {{ site.label }} 준비 중</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+</head>
+<body class="site-page soon-floor o-{{ office_info.id }}">
+<header class="bar">
+    <a class="mark" href="{{ url_for('home') }}"><span class="mark-star">★</span> Starful HQ</a>
+    {% include "_site_switch.html" %}
+</header>
+{% set ready = office_sites | length %}
+<main class="soon-wrap">
+    <section class="soon-head">
+        <p class="kicker"><span class="floor-chip">{{ office_info.floor_label }}</span> {{ office_info.name }} · {{ office_info.blurb }}</p>
+        {% if not ready %}
+        <h1>{{ office_info.name }} 오피스 <small>오픈 준비 중</small></h1>
+        <p>{{ office_info.floor_label }}에 새 팀 {{ staff | length }}명이 들어왔어요. 사이트를 연결하면 바로 일을 시작해요.
+            {{ office_info.name }} 팀은 {{ office_info.floor_label }} 사이트만 맡고, 1층 사람들과 따로 일해서 서로 기다리지 않아요.</p>
+        {% else %}
+        <h1>{{ site.label }} <small>준비 중</small></h1>
+        <p>{{ site.blurb }} · 이 사이트는 아직 연결 전이에요.</p>
+        {% endif %}
+        <ul class="soon-sites">
+            {% for sid in office_info.sites %}{% set s = all_sites[sid] %}
+            <li class="{{ 'on' if s.enabled }}{{ ' here' if sid == site.id }}">{{ sico(sid) }}<b>{{ s.label }}</b><small>{{ s.blurb }}</small><em>{{ '연결됨' if s.enabled else '연결 전' }}</em></li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% with here="", focus_role="", focus_label="" %}{% include "_office_map.html" %}{% endwith %}
+    <section class="soon-team">
+        <h2>{{ office_info.floor_label }} 사람들</h2>
+        {% for team, info in [("plan", "Planning"), ("mkt", "Marketing"), ("design", "Design"), ("dev", "Dev")] %}
+        {% set members = staff | selectattr("team", "equalto", team) | list %}
+        {% if members %}
+        <div class="soon-teamrow tone-{{ team }}">
+            <b>{{ info }} <small>{{ members | length }}명</small></b>
+            {% for p in members %}<span class="soon-person">{{ chibi(p, face=True) }}<span>{{ p.full }}<small>{{ p.title }}</small></span></span>{% endfor %}
+        </div>
+        {% endif %}
+        {% endfor %}
+    </section>
+</main>
+</body>
+</html>

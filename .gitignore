@@ -1,0 +1,14 @@
+# runtime data (queues, proposals, usage, limits, boss emails)
+data/
+# local backups (use git history instead)
+.bak/
+# python / tools
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.env
+.env.*
+# OS
+.DS_Store

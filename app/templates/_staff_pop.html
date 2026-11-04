@@ -1,0 +1,39 @@
+{# 👥 사원 card — busy people full rows; idle = compact faces. Needs: floors, here. #}
+{% from "_site_ico.html" import sico with context %}
+{% set total = floors | sum(attribute='count') %}{% set busy = floors | sum(attribute='busy') %}
+<header class="gp-head sp-head"><b>👥 사원</b><span class="gp-total">{{ total }}<small>명</small></span></header>
+<p class="sp-sum">지금 일하는 사람 <b class="{{ 'on' if busy }}">{{ busy }}명</b>{% if total > busy %} · 쉬는 {{ total - busy }}명{% endif %}</p>
+<div class="sp-floor-tabs" data-here="{{ here }}">
+    {% for f in floors | sort(attribute='floor') %}
+    <button type="button" class="o-{{ f.id }}" data-sp-floor="{{ f.id }}"><i class="ss-floor">{{ f.floor_label }}</i>{{ f.name }} <small>{% if f.busy %}{{ f.busy }} 작업{% else %}{{ f.count }}명{% endif %}</small></button>
+    {% endfor %}
+</div>
+{% for f in floors | sort(attribute='floor') %}
+<section class="sp-floor" data-floor="{{ f.id }}"{% if f.id != here %} hidden{% endif %}>
+    {% for t in f.teams %}
+    {% set working = t.members | selectattr('now') | list %}
+    {% set idle = t.members | rejectattr('now') | list %}
+    <h4 class="tone-{{ t.team }}">{{ t.name }} <small>{% if working %}{{ working | length }} 작업{% endif %}{% if working and idle %} · {% endif %}{% if idle %}쉬는 {{ idle | length }}{% endif %}</small></h4>
+    {% if working %}
+    <ul class="sp-people">
+        {% for p in working %}
+        <li class="busy" title="{{ p.name_ko }} · {{ p.name_ja }}{% if p.last %} · 마지막: {{ p.last.at[5:] }} {{ p.last.text }}{% endif %}">
+            <span class="sp-face"><img src="{{ url_for('static', filename=p.face) }}" alt="" loading="lazy">{% if p.lead %}<i>★</i>{% endif %}</span>
+            <span class="sp-who"><b>{{ p.full }}</b><small>{{ p.title }}</small></span>
+            <span class="sp-now">{{ sico(p.now_site) if p.now_site }}<em>{{ p.now }}</em></span>
+            <span class="sp-week" title="이번 주 끝낸 일 · 누적 {{ p.done }}건">{{ p.week }}<small>건</small></span>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    {% if idle %}
+    <div class="sp-idle" title="쉬는 중">
+        <span class="sp-idle-faces">{% for p in idle %}<span class="sp-face" title="{{ p.full }} · {{ p.title }}{% if p.week %} · 이번 주 {{ p.week }}건{% endif %}"><img src="{{ url_for('static', filename=p.face) }}" alt="{{ p.full }}" loading="lazy">{% if p.lead %}<i>★</i>{% endif %}</span>{% endfor %}</span>
+        <em>쉬는 {{ idle | length }}명</em>
+    </div>
+    {% elif not working %}
+    <p class="hint">이 팀 사람이 없어요.</p>
+    {% endif %}
+    {% endfor %}
+</section>
+{% endfor %}

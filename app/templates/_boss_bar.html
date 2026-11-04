@@ -1,0 +1,6 @@
+{# 사장 로그인 상태 (header). Needs: boss (app context processor). #}
+{% if boss.me %}
+<span class="boss-bar on" title="사장 계정으로 들어와 있어요 · PR·머지·배포는 사장님이 퇴근하시면 작업해요">👑 <b>{{ boss.name }}</b> 사장님 <a href="{{ url_for('logout', next=request.path) }}">퇴근(로그아웃)</a></span>
+{% else %}
+<a class="boss-bar" href="{{ url_for('login', next=request.path) }}" title="사장 구글 계정으로 들어오면 사장 캐릭터가 나와요">👑 사장 로그인</a>
+{% endif %}

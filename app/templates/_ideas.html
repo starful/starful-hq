@@ -1,0 +1,31 @@
+{# Meeting ideas on the status drawer. Needs: cur_site, all_sites, staff_map, flow_now. Run = enqueue. #}
+{% from "_chibi.html" import chibi %}
+{% from "_site_ico.html" import sico with context %}
+{% macro ideas(proposal, limit=99) -%}
+            <ol class="ideas ranked">
+                {% for x in (proposal.ideas or [])[:limit] %}
+                {% set act = x.action or {} %}
+                <li>
+                    <span class="rank">{{ x.rank }}</span>
+                    <div class="idea-body">
+                        <p class="idea-who">{% if staff_map[x.who] %}<span class="face">{{ chibi(staff_map[x.who], face=True) }}</span>{% endif %}<b>{{ x.full or x.name }}</b> <span class="idea-meta">{{ x.position }}</span>{% if proposal.office and x.site %} <span class="idea-site">{{ sico(x.site) }}{{ all_sites[x.site].label if x.site in all_sites else x.site }}</span>{% endif %}</p>
+                        <b class="idea-title">{{ x.title }}</b>
+                        {% if x.why %}<p><em>왜</em> {{ x.why }}</p>{% endif %}
+                        {% if x.how %}<p><em>어떻게</em> {{ x.how }}</p>{% endif %}
+                        {% if x.impact %}<p><em>효과</em> {{ x.impact }}</p>{% endif %}
+                    </div>
+                    <div class="idea-run">
+                        {% set can_run = act.type in ("write", "feature", "search", "polish", "analyze") and (act.type != "write" or cur_site.can_write) %}
+                        {% if x.started %}<button class="act ghost small" type="button" disabled title="{{ x.started }}">담김</button>
+                        {% elif can_run %}
+                        <form method="post" action="{{ url_for('site_meeting_run') }}" class="idea-form">
+                            <input type="hidden" name="pid" value="{{ proposal.id }}"><input type="hidden" name="idx" value="{{ loop.index0 }}">
+                            <button class="act small" type="submit">담기</button>
+                            <small class="idea-msg" data-msg hidden></small>
+                        </form>
+                        {% endif %}
+                    </div>
+                </li>
+                {% endfor %}
+            </ol>
+{%- endmacro %}

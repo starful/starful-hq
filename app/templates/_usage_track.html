@@ -1,0 +1,26 @@
+{# Lightweight HQ UI click beacons. Any [data-track="ui:…"] click is counted. #}
+<script>
+(function () {
+    const URL = {{ url_for('usage_track') | tojson }};
+    function send(event, detail) {
+        if (!event || event.indexOf("ui:") !== 0) return;
+        const body = JSON.stringify({ event: event, detail: detail || "" });
+        try {
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon(URL, new Blob([body], { type: "application/json" }));
+                return;
+            }
+        } catch (_) {}
+        fetch(URL, { method: "POST", headers: { "Content-Type": "application/json", "X-Requested-With": "fetch" }, body }).catch(() => {});
+    }
+    document.addEventListener("click", (ev) => {
+        const el = ev.target.closest("[data-track]");
+        if (!el) return;
+        send(el.getAttribute("data-track"), el.getAttribute("data-track-detail") || "");
+    }, true);
+    // Floor tabs (no data-track on the button when navigating away — count here)
+    document.querySelectorAll(".fs-floor").forEach((b) => b.addEventListener("click", () => {
+        if (!b.classList.contains("here")) send("ui:floor", b.dataset.floor || "");
+    }));
+})();
+</script>

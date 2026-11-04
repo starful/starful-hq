@@ -1,0 +1,1490 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ cur_site.label }} · {{ cur_office.name }} — Starful HQ</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='hq-icon.svg') }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='hq-icon-32.png') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='hq-icon-180.png') }}">
+</head>
+{% from "_chibi.html" import chibi %}
+{% from "_ideas.html" import ideas with context %}
+{% from "_site_ico.html" import sico with context %}
+{# One row per article: GSC splits a page into #anchor rows. Keep the first (most shown). #}
+{% set ns = namespace(seen=[], rows=[]) %}
+{% for r in site.search.rows %}{% set k = r.url.split('#')[0] %}{% if k not in ns.seen %}{% set ns.seen = ns.seen + [k] %}{% set ns.rows = ns.rows + [r] %}{% endif %}{% endfor %}
+{% set staff = {} %}{% for p in (office.everyone or office.roster) %}{% set _ = staff.update({p.id: p}) %}{% endfor %}
+{# Work is by team (anyone on it can do any of it); the face shown is whoever is next in turn. #}
+{% set who = next_up %}
+{# B1(borrow) has no planners: PR 만들기는 개발팀이 맡음 (office.BORROW_TEAM). #}
+{% set issue_team = "dev" if office.borrow else "plan" %}
+{% set task_team = {"research": "plan", "write": "plan", "issue": issue_team, "search": "mkt", "polish": "mkt", "analyze": "mkt", "refactor": "dev", "propose": "plan", "fix": "mkt",
+                    "images": "design", "review": "dev", "push": "dev", "ship": "dev"} %}
+{% set busy_ids = jobs | dictsort | selectattr('1.running') | map(attribute='0') | list %}
+{% macro ask(task, words) -%}
+{% set p = staff[who[task]] %}{% set t = team_info[task_team[task]] %}
+<div class="ask tone-{{ task_team[task] }}">
+    <span class="face big">{{ chibi(p, face=True) }}</span>
+    <div>
+        <p class="ask-who">{{ t.name }} · {% for r in teams[task_team[task]] %}{{ staff[r].name }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+        <p class="ask-say">{{ words }}</p>
+    </div>
+</div>
+{%- endmacro %}
+{% macro go_team(key, label, disabled=False, task="", quiet=False, btn_id="", btn_form="") -%}
+{% set members = teams[key] %}
+{% set free = members | reject('in', busy_ids) | list %}
+{% set holder = group_busy.get(task_group.get(task, task)) if task else none %}
+{% if holder %}<button class="act big" type="submit"{% if btn_id %} id="{{ btn_id }}"{% endif %}{% if btn_form %} form="{{ btn_form }}"{% endif %} disabled>{{ staff[holder].name }}이(가) 이 일을 하는 중이에요</button>
+{% if not quiet %}<span class="team-free"><span class="face busy">{{ chibi(staff[holder], face=True) }}</span> 끝나면 맡길 수 있어요</span>{% endif %}
+{% elif not free %}<button class="act big" type="submit"{% if btn_id %} id="{{ btn_id }}"{% endif %}{% if btn_form %} form="{{ btn_form }}"{% endif %} disabled>{{ team_info[key].name }} {{ members | length }}명 모두 일하는 중…</button>
+{% else %}<button class="act big" type="submit"{% if btn_id %} id="{{ btn_id }}"{% endif %}{% if btn_form %} form="{{ btn_form }}"{% endif %}{% if disabled %} disabled{% endif %}>{{ label }}</button>
+{% if not quiet %}<span class="team-free">{% for r in members %}<span class="face{% if r not in free %} busy{% endif %}" title="{{ staff[r].name }} · {{ staff[r].title }}{% if r not in free %} · 일하는 중{% endif %}">{{ chibi(staff[r], face=True) }}</span>{% endfor %}{% if members | length > 1 %} {{ free | length }}명 가능{% endif %}</span>{% endif %}{% endif %}
+{%- endmacro %}
+{% macro go(task, label, disabled=False, quiet=False, btn_id="", btn_form="") -%}{{ go_team(task_team[task], label, disabled, task if task not in ["write", "search", "polish", "images"] else "", quiet, btn_id, btn_form) }}{%- endmacro %}
+{% macro analysis_card(a) -%}
+<details class="analysis card">
+    <summary><b>📊 GA4·GSC 분석</b> {% if a.at %}<span class="when">{{ a.at }} · {{ a.period }}</span>{% if a.headline %} <span class="sum-head">{{ a.headline }}</span>{% endif %}{% else %}<span class="when">아직 없어요</span>{% endif %}</summary>
+    {% if a.at %}
+    {% if a.headline %}<p class="headline">{{ a.headline }}</p>{% endif %}
+    <ul class="numbers">
+        {% for n in a.numbers %}<li><em>{{ n.src }} · {{ n.label }}</em><b>{{ n.value }}</b>{% if n.delta %}<span class="{{ 'up' if n.delta.startswith('+') else 'down' }}">{{ n.delta }}</span>{% endif %}</li>{% endfor %}
+    </ul>
+    {% if a.findings %}<h3>보인 것</h3><ul class="findings">{% for f in a.findings %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
+    {% if a.actions %}<h3>할 일</h3><ul class="findings">{% for x in a.actions %}<li><b>{{ x.team }}</b> {{ x.text }}</li>{% endfor %}</ul>{% endif %}
+    {% if a.topics %}<h3>새 글 아이디어 <small>(기획팀 상세의 맡길 목록에 들어가요)</small></h3><ul class="findings">{% for x in a.topics %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+    {% if a.errors %}<p class="hint warn">일부 숫자를 못 받았어요: {{ a.errors | join(' · ') }}</p>{% endif %}
+    {% endif %}
+</details>
+{%- endmacro %}
+<body class="site-page floor-{{ cur_office.floor }} o-{{ cur_office.id }}" data-step="{{ step }}">
+<header class="bar">
+    <a class="mark" href="{{ url_for('home') }}"><span class="mark-star">★</span> Starful HQ</a>
+    {% include "_site_switch.html" %}
+    <span class="bar-site">{{ site.refreshed_at or snap.refreshed_at }}</span>
+    <button type="button" class="staff-btn" id="staff-btn" data-url="{{ url_for('staff_page') }}" title="모든 층 사람들 · 지금 하는 일">👥 사원</button>
+    <div class="staff-pop" id="staff-pop" hidden></div>
+    <button type="button" class="staff-btn" id="usage-btn" data-url="{{ url_for('usage_card') }}" data-track="ui:usage" title="HQ에서 자주·드물게 누른 것">👆 HQ</button>
+    <div class="staff-pop usage-pop" id="usage-pop" hidden></div>
+    {% include "_boss_bar.html" %}
+    <form method="post" action="{{ url_for('refresh') }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <button type="submit">새로고침</button>
+    </form>
+</header>
+
+    {% if not cur_site.enabled %}
+        <div class="not-connected"><b>{{ cur_office.floor_label }} {{ cur_office.name }} · {{ cur_site.label }}</b> 아직 연결 전이에요.
+            {{ cur_office.floor_label }} 사람들은 사이트가 연결되면 바로 일을 시작해요. 그 전까지는 일을 맡길 수 없어요.</div>
+        {% endif %}
+<main class="work">
+    <section class="work-map">
+        {% with here=("search" if step == "polish" else step), focus_role="", focus_label="" %}
+        {% include "_office_map.html" %}
+        {% endwith %}
+    </section>
+
+    <aside class="side{% if tab not in ('status', 'meet') %} team-detail{% endif %}" data-tab="{{ tab }}">
+    <nav class="tabs" aria-label="팀">
+        {% set tab_url = {"status": url_for('site_status'), "plan": url_for('site_write'), "mkt": url_for('site_search'), "design": url_for('site_images'), "dev": url_for('site_ship')} %}
+        {% for key, icon, label, steps_of in tabs %}
+        {% set n_busy = (teams[key] | select('in', busy_ids) | list | length) if key in teams else 0 %}
+        <a href="{{ tab_url[key] }}" class="tab tone-{{ key }}{% if tab == key %} here{% endif %}" data-track="ui:tab:{{ key }}"{% if tab == key %} aria-current="page"{% endif %}>
+            <i aria-hidden="true">{{ icon }}</i>{{ label }}{% if n_busy %}<small class="tab-busy">{{ n_busy }}명 작업</small>{% endif %}</a>
+        {% endfor %}
+    </nav>
+
+    {% set team_text = {
+        "plan": (waiting.write ~ " 남음" if waiting.write else ("관리·SEO만 · 글쓰기 없음" if office.borrow else "트렌드로 주제 찾기 · 글쓰기")) ~ ((" · " ~ waiting.issue) if waiting.issue and not office.borrow else ""),
+        "mkt": (("고칠 검색 글 " ~ (ns.rows | length) ~ "편") if ns.rows else "고칠 검색 글 없음 · 다듬기 · 분석"),
+        "design": "이미지 " ~ (site.images.count or 0) ~ "개" ~ (" · YouTube" if cur_site.youtube_on else "") ~ " · 목록에서 고르기",
+        "dev": ([waiting.issue if office.borrow else none, waiting.review, waiting.deploy] | select | join(" · ")) or "자동 진행 · 막히면 상세",
+    } %}
+    {% if quick %}
+    {% set doing = quick.people | selectattr('busy') | list %}
+    {% set st = ship_stage or {} %}
+    <section class="quick team-sum tone-{{ quick.team }}" data-team="{{ quick.team }}">
+        <div class="ts-head">
+            <b>{{ quick.title }}</b>
+            <span class="ts-busy{% if doing %} on{% endif %}" id="ts-busy">{% if doing %}▶ {{ doing | length }}명 작업{% else %}쉬는 중{% endif %}</span>
+        </div>
+        <div class="quick-people">
+            {% for p in quick.people %}<span class="qp{% if p.busy %} busy{% endif %}" data-role="{{ p.id }}" title="{{ p.name }} · {{ p.title }}{% if p.busy %} · {{ p.line }}{% endif %}">{{ chibi(staff[p.id], face=True) }}<b title="{{ p.full }}">{{ p.full }}</b><small data-line>{{ p.line[:22] if p.busy else p.title }}</small></span>{% endfor %}
+        </div>
+        <p class="ts-line">{{ team_text[quick.team] }}</p>
+        <div class="ts-cmd">
+            {% if office.borrow %}
+            <p class="hint">{% if quick.team == "dev" %}B1 개발팀 · PR은 상세에서{% else %}B1에는 이 팀 회의가 없어요{% endif %}</p>
+            {% else %}
+            {% with team=quick.team %}{% include "_team_meet.html" %}{% endwith %}
+            {% endif %}
+            {% if quick.team == "dev" and st %}
+            <div class="ts-ship">
+                <p class="ts-ship-line">{% if st.key == "check" %}✅ {{ st.label }} · <a href="{{ st.url }}" target="_blank" rel="noopener">사이트 열기</a>
+                {% elif st.key == "stuck" %}<span class="warn">{{ st.label }}{% if st.detail %} · {{ st.detail }}{% endif %}</span>
+                {% elif st.key != "idle" %}{{ st.label }}{% if st.detail %} · {{ st.detail }}{% endif %}
+                {% else %}올릴 변경 없음{% if st.detail %} · {{ st.detail }}{% endif %}{% endif %}</p>
+                {% if st.key == "check" %}
+                <form method="post" action="{{ url_for('site_checked') }}" class="inline-form"><button class="act ghost small" type="submit">✓ 확인했어요</button></form>
+                {% endif %}
+                <form method="post" action="{{ url_for('site_autoship') }}" class="ss-auto" data-auto data-floor-label="{{ st.floor_label or cur_office.floor_label }}">
+                    <input type="hidden" name="on" value="{{ '0' if st.auto else '1' }}">
+                    <button type="submit" class="f3-toggle{% if st.auto %} on{% endif %}" title="{{ st.floor_label or cur_office.floor_label }} 전체 · PR·리뷰·머지·배포"><span></span>{{ st.floor_label or cur_office.floor_label }} 자동 진행 {{ '켬' if st.auto else '끔' }}</button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+    </section>
+    {% elif step == "status" %}
+    <section class="quick status-sum">
+        {% set bad_tools = tool_rows | rejectattr('ok') | list %}
+        {% set st = ship_stage or {} %}
+        <div class="ss-head">
+            <b>{{ site.sentence }}</b>
+            <span class="when">{{ site.refreshed_at or snap.refreshed_at }}</span>
+            {% if bad_tools %}{% for t in bad_tools %}<span class="chip bad" title="{{ t.detail }}{% if t.fix %} → {{ t.fix }}{% endif %}">⚠️ {{ t.name }}</span>{% endfor %}
+            {% else %}<span class="chip ok" title="{% for t in tool_rows %}{{ t.name }} {% endfor %}">✅ 도구 준비됨</span>{% endif %}
+            {% if tool_rows | selectattr('id', 'equalto', 'claude') | selectattr('login') | list %}
+            <form method="post" action="{{ url_for('site_claude_login') }}" class="inline-form"><button class="act ghost small" type="submit">Claude 로그인</button></form>
+            {% endif %}
+            {% if bad_tools %}
+            <form method="post" action="{{ url_for('site_tools_check') }}" class="inline-form"><button class="act ghost small" type="submit">도구 다시 확인</button></form>
+            {% endif %}
+        </div>
+
+        <div class="ss-block">
+            <p class="ss-title">💬 전체 회의 <small>{% if proposal.at %}최근 {{ proposal.at[5:] }} {{ (proposal.mode_label or '전사 회의').split(' (')[0] }}{% else %}열면 결과가 쌓여요{% endif %}</small></p>
+            {% if office.borrow %}<p class="hint">B1에는 회의실이 없어요. 회의는 1층·2층에서 열어요.</p>{% else %}{% include "_meeting_buttons.html" %}{% endif %}
+            <p class="ss-meet-link">
+                <a href="{% if proposal.id %}{{ url_for('site_meet', proposal=proposal.id) }}{% else %}{{ url_for('site_meet') }}{% endif %}">회의 결과 보기 →</a>
+                {% if st.key == "check" %}
+                <span class="ss-check">✅ {{ st.label }} · <a href="{{ st.url }}" target="_blank" rel="noopener">🌐 사이트 열기</a>
+                    <form method="post" action="{{ url_for('site_checked') }}" class="inline-form"><button class="act ghost small" type="submit">✓ 확인했어요</button></form>
+                </span>
+                {% endif %}
+            </p>
+        </div>
+
+        <div class="ss-block traffic-card" id="traffic-card" data-url="{{ url_for('site_analytics_card') }}" data-stale="1">
+            <p class="ss-title">📊 트래픽 · 검색 <small>읽는 중…</small></p>
+            <p class="hint">GA4 그래프 · GSC 검색어를 불러오는 중이에요.</p>
+        </div>
+
+    </section>
+    {% elif step == "meet" %}
+    {% include "_meet_results.html" %}
+    {% endif %}
+
+    {% set details = {
+        "write": ("기획팀 상세", "키워드 고르기 · " ~ cur_site.words.picks ~ " 골라 맡기기"),
+        "search": ("마케팀 상세", "분석 · 고칠 글" ~ (" · 다듬기" if cur_site.can_polish else "")),
+        "polish": ("직접 고치기", "본문 직접 수정"),
+        "images": ("디자인팀 상세", "한 장씩 보고 고치기 · " ~ ((live_images or site.images).count if (live_images or site.images) else site.images.count) ~ "개"),
+        "ship": ("개발팀 상세", "반영 상태 · 최적화 · 공통화"),
+    } %}
+    {% set step_url = {"write": url_for('site_write'), "search": url_for('site_search'), "images": url_for('site_images'), "ship": url_for('site_ship')} %}
+    {% if tab not in ("status", "meet") %}
+    <div class="detail-list" id="detail-reopen" hidden>
+        <button type="button" class="detail-btn tone-{{ tab }}" data-open-drawer data-track="ui:drawer"><b>{{ details[step][0] if step in details else "상세" }}</b><span>{{ details[step][1] if step in details else "" }}</span><i>펼치기 →</i></button>
+    </div>
+    {% endif %}
+
+        {% set focus_team = tab if tab not in ("status", "meet") else "" %}
+    <div class="drawer tone-{{ tab }}{% if step in details %} open{% endif %}" id="drawer"{% if step in details %} data-open="1"{% endif %}{% if step not in details %} hidden{% endif %} aria-label="상세 지시">
+        <header class="drawer-head">
+            <div class="dh-text">
+                <b>{{ details[step][0] if step in details else "" }}</b>
+                {% if step in details %}<span>{{ details[step][1] }}</span>{% endif %}
+            </div>
+            <button type="button" class="x" data-close-drawer aria-label="접기" title="접기">−</button>
+        </header>
+    <section class="task">
+    {% if step == "write" and not cur_site.can_write %}
+        <div class="not-yet">
+            <p><b>{{ cur_site.label }}는 아직 글쓰기가 연결되지 않았어요.</b></p>
+            <p class="hint">리서치·새 글 쓰기는 OKPy 전용 도구로 돌아가요. {{ cur_site.label }}에 맞는 글 만들기는 다음 단계에서 연결해요.
+                지금은 🔎 검색(SEO 수정) · 분석 · ✨ 다듬기 · 반영(PR·배포)을 쓸 수 있어요.</p>
+        </div>
+
+    {% elif step == "write" %}
+        {% set picks = research.picks or [] %}
+        {% set chips = seed_chips or {"all": [], "checked": []} %}
+        {% set fresh = picks | selectattr('status', 'equalto', 'new') | list %}
+        <div class="write-flow">
+            <section class="wf-block">
+                <header class="wf-head">
+                    <b>키워드</b>
+                    <span>{{ chips.all | length }}개 중 고르면 주제를 찾아와요</span>
+                </header>
+                <form method="post" action="{{ url_for('site_write_research') }}" class="wf-form" id="seed-form">
+                    <div class="chips seed-chips" data-max="20">
+                        {% for w in chips.all %}
+                        <label class="chip-check"><input type="checkbox" name="seed" value="{{ w }}"{% if w in chips.checked %} checked{% endif %}><span>{{ w }}</span></label>
+                        {% else %}
+                        <p class="hint">시드 키워드가 없어요.</p>
+                        {% endfor %}
+                    </div>
+                    <div class="wf-row">
+                        {{ go("research", "주제 찾기 맡기기", quiet=True) }}
+                    </div>
+                </form>
+            </section>
+
+            <section class="wf-block">
+                <header class="wf-head">
+                    <b>맡길 {{ cur_site.words.picks }}</b>
+                    <span>{% if fresh %}{{ fresh | length }}개 · 최대 15{{ cur_site.words.unit }}{% else %}리서치·분석 추천이 여기 모여요{% endif %}</span>
+                </header>
+                <form method="post" action="{{ url_for('site_write_picks') }}" id="picks-form">
+                    {% if fresh %}
+                    <div class="wf-go">
+                        <button type="button" class="act ghost" id="pick-all">모두 고르기</button>
+                        {{ go("write", "기획팀에게 " ~ cur_site.words.verb ~ " 맡기기", quiet=True) }}
+                    </div>
+                    {% endif %}
+                    <ul class="pick checks">
+                        {% for p in fresh %}
+                        <li{% if p.source == 'analysis' %} class="pick-ana"{% endif %}><label>
+                            <input type="checkbox" name="pick" value="{{ p.id }}"{% if loop.index0 < 3 %} checked{% endif %}>
+                            <span><b>{{ p.topic }}</b>
+                            <em><i class="tag{% if p.source == 'analysis' %} ai{% endif %}">{{ '분석 추천' if p.source == 'analysis' else kind_of(p) }}</i></em>
+                            </span>
+                        </label></li>
+                        {% else %}
+                        <li class="empty">아직 {{ cur_site.words.picks | josa('이/가') }} 없어요. 위에서 주제 찾기를 맡겨 주세요.</li>
+                        {% endfor %}
+                    </ul>
+                </form>
+            </section>
+        </div>
+    {% elif step == "polish" %}
+        {% if post %}
+        <section class="card editor-card" id="editor">
+            <p class="kicker">직접 고치기 · {{ post.rel }}{% if post.saved %} · <b class="ok">저장했어요</b>{% endif %}</p>
+            <h2>{{ post.title }}</h2>
+            <form method="post" action="{{ url_for('site_write_save') }}" class="editor">
+                <input type="hidden" name="path" value="{{ post.rel }}">
+                <textarea name="body" rows="22">{{ post.body }}</textarea>
+                <div class="row">
+                    <button class="act" type="submit">저장</button>
+                    <a href="{{ url_for('site_search', pick=post.rel) }}#polish">AI로 다듬기 맡기기</a>
+                    <a href="{{ url_for('site_search') }}#d">마케팀 상세로</a>
+                </div>
+            </form>
+        </section>
+        {% else %}
+        <p class="hint"><a href="{{ url_for('site_search') }}#d">마케팀 상세</a>에서 분석 · 고칠 글을 맡기세요.</p>
+        {% endif %}
+
+    {% elif step == "search" %}
+        {% set targets = targets or {"rows": [], "total": 0, "search_n": 0, "polish_n": 0, "ai_n": 0, "polish_max": 4, "can_polish": cur_site.can_polish} %}
+        {% set a_days = analysis_days or [] %}
+        {% set a_day = analysis_day or '' %}
+        {% set a_counts = analysis_day_counts or {} %}
+        {% set tag_label = {"ai": "분석 추천", "low_ctr": "클릭 낮음", "low_impression": "노출 적음", "gsc": "노출 적음", "old": "오래된 글", "search": "검색", "polish": "다듬기"} %}
+        <div class="write-flow">
+            <section class="wf-block">
+                <header class="wf-head">
+                    <b>분석</b>
+                    <span>GA4·GSC 28일 · 고칠 글 추천</span>
+                </header>
+                {% if a_days %}
+                <nav class="day-nav" aria-label="분석 날짜">
+                    {% if analysis_day_newer %}<a class="day-arrow" href="{{ url_for('site_search', date=analysis_day_newer) }}#d" data-track="ui:analysis-day">‹</a>
+                    {% else %}<span class="day-arrow off">‹</span>{% endif %}
+                    <div class="day-chips">
+                        {% for d in a_days[:14] %}
+                        <a class="day-chip{% if d == a_day %} on{% endif %}" href="{{ url_for('site_search', date=d) }}#d" data-track="ui:analysis-day">{{ d[5:] }}{% if a_counts.get(d, 0) > 1 %}<em>{{ a_counts.get(d) }}</em>{% endif %}</a>
+                        {% endfor %}
+                    </div>
+                    {% if analysis_day_older %}<a class="day-arrow" href="{{ url_for('site_search', date=analysis_day_older) }}#d" data-track="ui:analysis-day">›</a>
+                    {% else %}<span class="day-arrow off">›</span>{% endif %}
+                </nav>
+                {% endif %}
+                {{ analysis_card(analysis) }}
+                <div class="wf-go">
+                    <form method="post" action="{{ url_for('site_search_analyze') }}">{{ go("analyze", ("다시 분석 맡기기" if analysis.at else "분석 맡기기"), quiet=True) }}</form>
+                </div>
+            </section>
+
+            <form method="post" action="{{ url_for('site_search_run') }}" id="mkt-form" class="limit-form" data-name="target" data-auto-pick="1" data-count-el="mkt-count" data-go="mkt-go"></form>
+
+            <section class="wf-block" id="polish">
+                <header class="wf-head">
+                    <b>고칠 글</b>
+                    <span>고르면 검색·다듬기를 알아서 · 최대 15편 · 목록은 조금씩</span>
+                </header>
+                <p class="list-note">전체 {{ targets.total }}편{% if targets.search_n %} · 검색 {{ targets.search_n }}{% endif %}{% if targets.can_polish and targets.polish_n %} · 다듬기 {{ targets.polish_n }}{% endif %}{% if targets.ai_n %} · 분석 추천 {{ targets.ai_n }}{% endif %}{% if site.search.skipped_tries %} · 4번 고친 {{ site.search.skipped_tries }}편은 뺐어요{% endif %}{% if site.search.cache_day %} · GSC {{ site.search.cache_day }}{% endif %}
+                    <span data-count id="mkt-count"></span></p>
+                <div class="pick-list" data-pick-list data-page="30" data-filter="focus" data-form="mkt-form">
+                    <div class="pick-filters" role="tablist" aria-label="고칠 글 필터">
+                        <button type="button" class="pick-f on" data-filter="focus">우선</button>
+                        {% if targets.ai_n %}<button type="button" class="pick-f" data-filter="ai">분석 추천</button>{% endif %}
+                        <button type="button" class="pick-f" data-filter="low_ctr">클릭 낮음</button>
+                        <button type="button" class="pick-f" data-filter="low_impression">노출 적음</button>
+                        {% if targets.can_polish %}<button type="button" class="pick-f" data-filter="old">오래된 글</button>{% endif %}
+                        <button type="button" class="pick-f" data-filter="all">전체</button>
+                    </div>
+                    <div class="wf-go mkt-go">{{ go("search", "맡기기", quiet=True, btn_id="mkt-go", btn_form="mkt-form") }}</div>
+                    <ul class="pick checks">
+                        {% for row in targets.rows %}
+                        {% set tags = row.tags or [] %}
+                        {% set is_rec = 'ai' in tags %}
+                        {% set doing_s = row.url and items_busy.search.get(row.url) %}
+                        {% set doing_p = row.rel and items_busy.polish.get(row.rel) %}
+                        {% set doing = doing_s or doing_p %}
+                        <li class="{{ 'tag-ai' if is_rec else ('tag-' ~ (row.pattern or tags[0] or 'old')) }}" data-tags="{{ tags | join(' ') }}"><label>
+                            <input form="mkt-form" type="checkbox" name="target" value="{{ row.value }}"{% if doing %} disabled data-busy="1"{% elif (pick and row.rel == pick) or (not pick and is_rec and loop.index <= 15) %} checked{% endif %}{% if is_rec %} data-rec="1"{% endif %}>
+                            <span><b>{{ row.title }}</b>
+                            <em>{% for t in tags if t in tag_label and t not in ('search', 'gsc') %}<i class="tag{{ ' ai' if t == 'ai' else '' }}">{{ tag_label[t] }}</i> {% endfor %}
+                            {% if row.url %}클릭률 {{ "%.1f"|format(row.ctr * 100) }}% · 노출 {{ row.impressions|int }}회 · 평균 {{ "%.0f"|format(row.position) }}위{% if row.seo_count %} · 검색 {{ row.seo_count }}/4{% endif %}{% endif %}
+                            {% if 'polish' in (row.jobs or []) %}{% if row.url %} · {% endif %}{% if row.section %}{{ row.section }} · {% endif %}{% if row.when %}수정 {{ row.when }}{% endif %}{% if row.polish_count %} · 다듬기 {{ row.polish_count }}/{{ targets.polish_max }}{% endif %}{% endif %}
+                            {% if row.why %} · {{ row.why }}{% endif %}{% if doing %} · <b class="doing">{{ staff[doing].name }} 작업 중</b>{% endif %}</em></span>
+                            {% if row.rel and targets.can_polish %}<a class="edit-link" href="{{ url_for('site_polish', path=row.rel) }}#editor">직접 고치기</a>{% endif %}
+                        </label></li>
+                        {% else %}
+                        <li class="empty">지금 고칠 글이 없어요.</li>
+                        {% endfor %}
+                    </ul>
+                    <button type="button" class="act ghost small pick-more" hidden>더 보기</button>
+                </div>
+            </section>
+            {% if not cur_site.can_polish %}
+            <p class="hint">이 사이트는 다듬기를 쓰지 않아요. 검색 · 분석만 해요.</p>
+            {% endif %}
+        </div>
+
+    {% elif step == "images" %}
+        {% set imgs = live_images or site.images %}
+        {% set img_kinds = namespace(kinds=[]) %}
+        {% for image in imgs.files if image.kind and image.kind != '안 씀' and image.kind not in img_kinds.kinds %}
+        {% if img_kinds.kinds.append(image.kind) %}{% endif %}
+        {% endfor %}
+        <form method="post" action="{{ url_for('site_image_replace') }}" enctype="multipart/form-data" id="own-form">
+            <input type="hidden" name="name" id="own-name">
+        </form>
+        {% set yt_noun = (cur_site.youtube.noun if cur_site.youtube_on else '') or '장소' %}
+        <div class="write-flow" id="design-flow"{% if cur_site.youtube_on %} data-has-yt="1"{% endif %}>
+            {% if cur_site.youtube_on %}
+            <div class="design-mode" role="tablist" aria-label="디자인 작업">
+                <button type="button" class="design-mode-btn on" role="tab" data-design-mode="images" aria-selected="true">이미지</button>
+                <button type="button" class="design-mode-btn" role="tab" data-design-mode="youtube" aria-selected="false">YouTube</button>
+            </div>
+            {% endif %}
+            <section class="wf-block" data-design-panel="images">
+                <header class="wf-head">
+                    <b>이미지 고르기</b>
+                    <span>목록에서 고른 뒤 아래 버튼으로 바꿔요</span>
+                </header>
+                <div class="pick-list img-pick" data-img-pick data-page="30" data-filter="all">
+                    <div class="img-toolbar">
+                        <p class="list-note img-count">전체 {{ imgs.count }}개{% if imgs.unused %} · 안 씀 {{ imgs.unused }}{% endif %}{% if imgs.dups %} · 중복 {{ imgs.dups }}{% endif %}
+                            <span data-count id="tile-n"></span></p>
+                        <div class="pick-filters" role="tablist" aria-label="이미지 필터">
+                            <button type="button" class="pick-f on" data-filter="all">전체</button>
+                            <button type="button" class="pick-f" data-filter="used">쓰는 중</button>
+                            {% if imgs.unused %}<button type="button" class="pick-f" data-filter="unused">안 씀</button>{% endif %}
+                            {% if imgs.dups %}<button type="button" class="pick-f" data-filter="dup">중복</button>{% endif %}
+                            {% for k in img_kinds.kinds %}<button type="button" class="pick-f" data-filter="{{ k }}">{{ k }}</button>{% endfor %}
+                        </div>
+                        <input type="search" id="tile-q" class="tile-q" placeholder="이름·글 제목으로 찾기" autocomplete="off">
+                    </div>
+                    <input type="hidden" id="picked-input" name="name" {% if can_ai %}form="redraw-form"{% endif %} value="">
+                    <p id="picked-name" class="img-picked-label" hidden></p>
+
+                    <div class="img-gallery">
+                        <ul class="tiles">
+                            {% for image in imgs.files %}
+                            {% set tags = [] %}
+                            {% if image.kind == '안 씀' or not image.post %}{% set tags = tags + ['unused'] %}{% else %}{% set tags = tags + ['used'] %}{% endif %}
+                            {% if (image.dup or 1) > 1 %}{% set tags = tags + ['dup'] %}{% endif %}
+                            {% if image.kind %}{% set tags = tags + [image.kind] %}{% endif %}
+                            <li data-tags="{{ tags | join(' ') }}" data-q="{{ (image.name ~ ' ' ~ image.post ~ ' ' ~ (image.label or '') ~ ' ' ~ (image.kind or '') ~ (' 중복' if (image.dup or 1) > 1 else '')) | lower }}"><button type="button" class="tile" data-name="{{ image.name }}" data-src="{{ url_for('site_image_file', name=image.name) }}"{% if pickable and image.name in pickable %} data-pick="1"{% endif %}>
+                                <span class="tile-thumb"><img src="{{ url_for('site_image_file', name=image.name) }}" alt="" loading="lazy" decoding="async"></span>
+                                <span class="tile-meta">
+                                    {% if image.kind %}<i class="tile-tag{% if image.kind == '안 씀' %} off{% endif %}">{{ image.kind }}</i>{% endif %}{% if (image.dup or 1) > 1 %}<i class="tile-tag dup">중복 {{ image.dup }}</i>{% endif %}
+                                    <b title="{{ image.post or image.name }}">{{ image.label or image.post or image.name }}</b>
+                                    <em>{{ image.when }}</em>
+                                </span>
+                            </button></li>
+                            {% else %}
+                            <li class="empty">이미지가 없어요.</li>
+                            {% endfor %}
+                        </ul>
+                        <button type="button" class="act ghost small pick-more" hidden>더 보기</button>
+                    </div>
+                </div>
+            </section>
+            {% if cur_site.youtube_on %}
+            <section class="wf-block" data-design-panel="youtube" hidden>
+                <header class="wf-head">
+                    <b>YouTube</b>
+                    <span>모아서 붙인 뒤 · 반영 맡기기</span>
+                </header>
+                <div class="pick-list yt-pick" id="yt-wrap"
+                     data-yt-site="{{ cur_site.id }}"
+                     data-yt-noun="{{ yt_noun }}"
+                     data-yt-api="{{ url_for('site_youtube_api', path='') }}">
+                    <div class="img-toolbar">
+                        <p class="list-note img-count" id="yt-count">불러오는 중…</p>
+                        <div class="pick-filters" role="tablist" aria-label="YouTube 필터">
+                            <button type="button" class="pick-f yt-tab on" data-filter="missing" aria-selected="true">없음</button>
+                            <button type="button" class="pick-f yt-tab" data-filter="attached" aria-selected="false">있음</button>
+                        </div>
+                    </div>
+                    <p id="yt-picked" class="img-picked-label" hidden></p>
+                    <ul class="yt-rows" id="yt-shops"><li class="empty">로딩…</li></ul>
+                </div>
+            </section>
+            {% endif %}
+        </div>
+        <div class="img-actions sticky-go" id="img-actions" data-design-sticky="images">
+            <button type="button" class="act big" id="cand-open" disabled title="Google Places 후보 사진 중에서 직접 골라요">후보 고르기</button>
+            <button type="button" class="act ghost" id="img-ai-open" disabled{% if not can_ai %} hidden{% endif %}>AI로 그리기</button>
+            <label class="act ghost img-own" id="own-file">내 파일
+                <input type="file" accept="image/*" form="own-form" name="file" disabled onchange="this.form.requestSubmit()"></label>
+        </div>
+        {% if cur_site.youtube_on %}
+        <div class="img-actions sticky-go yt-actions" id="yt-actions" data-design-sticky="youtube" hidden>
+            <button type="button" class="act big yt-ship" id="yt-ship" hidden disabled title="붙인 영상을 모아 한 번 PR·배포">반영 맡기기</button>
+            <button type="button" class="act big" id="yt-fetch-open" disabled>후보 검색</button>
+            <button type="button" class="act ghost" id="yt-clear" disabled hidden>제거</button>
+        </div>
+        {% endif %}
+        {% if can_ai %}
+        <div class="ai-pop" id="ai-pop" hidden role="dialog" aria-label="AI로 그리기">
+            <form method="post" action="{{ url_for('site_image_redraw') }}" class="ai-box" id="redraw-form">
+                <header><b>AI로 그리기</b><button type="button" class="x" id="img-ai-cancel" aria-label="닫기">×</button></header>
+                <p class="when" id="ai-pop-name"></p>
+                <label class="img-ai-label">어떤 그림으로 그릴까요?
+                    <input type="text" name="hint" class="hint-input" id="img-ai-hint" placeholder="예: 밤거리 라멘집, 따뜻한 불빛 (비우면 글 제목)" autocomplete="off">
+                </label>
+                <div class="img-ai-go">{{ go("images", "그리기 맡기기", quiet=True, btn_id="img-go") }}</div>
+            </form>
+        </div>
+        {% endif %}
+        <div class="cand-pop" id="cand-pop" hidden role="dialog" aria-label="후보 사진 고르기">
+            <div class="cand-box">
+                <header><b>후보 사진 고르기</b><span class="when" id="cand-q"></span><button type="button" class="x" id="cand-x" aria-label="닫기">×</button></header>
+                <form class="cand-search" id="cand-search"><input type="search" id="cand-input" placeholder="다른 이름·주소로 다시 찾기"><button type="submit" class="act ghost small">찾기</button></form>
+                <div class="cand-grid" id="cand-grid"></div>
+                <p class="when cand-foot">Google Places 사진 · 고르면 바로 바뀌어요 · 후보를 볼 때마다 💰 Places 상한</p>
+            </div>
+        </div>
+        {% if cur_site.youtube_on %}
+        <div class="cand-pop yt-pop" id="yt-pop" hidden role="dialog" aria-label="YouTube 후보">
+            <div class="cand-box yt-cand-box">
+                <header><b>YouTube 후보</b><span class="when" id="yt-pop-name"></span><button type="button" class="x" id="yt-pop-x" aria-label="닫기">×</button></header>
+                <div class="cand-grid yt-cand-grid" id="yt-pop-grid"></div>
+                <p class="when cand-foot" id="yt-pop-foot">고르면 바로 붙여요 · 3~5개</p>
+            </div>
+        </div>
+        <script src="{{ url_for('static', filename='youtube.js') }}?v=5"></script>
+        {% endif %}
+        <script>
+        (function () {
+            const open = document.getElementById("cand-open"), pop = document.getElementById("cand-pop"), grid = document.getElementById("cand-grid");
+            if (!open || !pop) return;
+            document.body.appendChild(pop);   // out of the drawer: above the office map, not under its people
+            const C_URL = {{ url_for('site_image_candidates') | tojson }}, T_URL = {{ url_for('site_image_candidate') | tojson }}, P_URL = {{ url_for('site_image_pick') | tojson }};
+            let cur = "";
+            document.querySelectorAll(".tile").forEach((t) => t.addEventListener("click", () => {
+                cur = t.dataset.name;
+                open.hidden = false;
+                open.disabled = !t.dataset.pick;
+            }));
+            async function load(q) {
+                grid.innerHTML = '<p class="hint">Google Places에서 찾는 중…</p>';
+                let out = null;
+                try { out = await fetch(C_URL + "?name=" + encodeURIComponent(cur) + (q ? "&q=" + encodeURIComponent(q) : "")).then((r) => r.json()); } catch (_) {}
+                if (!out || !out.ok) { grid.innerHTML = ""; const p = document.createElement("p"); p.className = "hint warn"; p.textContent = (out && out.msg) || "후보를 찾지 못했어요"; grid.appendChild(p); return; }
+                document.getElementById("cand-q").textContent = out.query;
+                document.getElementById("cand-input").value = out.query;
+                grid.innerHTML = "";
+                if (!out.cands.length) { grid.innerHTML = '<p class="hint">사진이 있는 후보가 없어요. 이름·주소를 바꿔 다시 찾아 보세요.</p>'; return; }
+                out.cands.forEach((c) => {
+                    const b = document.createElement("button");
+                    b.type = "button"; b.className = "cand";
+                    b.innerHTML = '<img alt="" loading="lazy"><b></b><small></small>';
+                    b.querySelector("img").src = T_URL + "?ref=" + encodeURIComponent(c.ref);
+                    b.querySelector("b").textContent = c.place; b.querySelector("small").textContent = c.address;
+                    b.addEventListener("click", async () => {
+                        grid.querySelectorAll(".cand").forEach((x) => { x.disabled = true; });
+                        b.classList.add("on");
+                        const body = new FormData(); body.append("name", cur); body.append("ref", c.ref);
+                        let r = null;
+                        try { r = await fetch(P_URL, { method: "POST", body, headers: { "X-Requested-With": "fetch" } }).then((x) => x.json()); } catch (_) {}
+                        if (window.hqSay) window.hqSay((r && r.msg) || "바꾸지 못했어요", !!(r && r.ok));
+                        if (r && r.ok) {
+                            const v = "?v=" + Date.now();
+                            document.querySelectorAll(`.tile[data-name="${CSS.escape(cur)}"] img`).forEach((i) => { i.src = i.src.split("?")[0] + v; });
+                            pop.hidden = true;
+                        } else grid.querySelectorAll(".cand").forEach((x) => { x.disabled = false; });
+                    });
+                    grid.appendChild(b);
+                });
+            }
+            open.addEventListener("click", () => { if (!cur) return; pop.hidden = false; load(""); });
+            document.getElementById("cand-search").addEventListener("submit", (ev) => { ev.preventDefault(); load(document.getElementById("cand-input").value.trim()); });
+            document.getElementById("cand-x").addEventListener("click", () => { pop.hidden = true; });
+            pop.addEventListener("click", (ev) => { if (ev.target === pop) pop.hidden = true; });
+            document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") pop.hidden = true; });
+        })();
+        </script>
+
+
+    {% elif step == "ship" %}
+        {% set pr = flow.pr %}
+        {% set open_pr = pr and not flow.merged %}
+        {% set st = ship_stage or {} %}
+        {% set review_busy = teams.dev | select('in', busy_ids) | list | length == teams.dev | length %}
+        <div class="write-flow">
+            <section class="wf-block">
+                <header class="wf-head">
+                    <b>반영</b>
+                    <span>{{ st.floor_label or cur_office.floor_label }} 자동 진행이 기본 · 막히거나 껐을 때만 버튼</span>
+                </header>
+                <div class="ship-now">
+                    <p class="ship-now-label">{% if st.key == "check" %}✅ {{ st.label }}
+                    {% elif st.key == "stuck" %}<span class="warn">{{ st.label }}</span>
+                    {% elif st.key and st.key != "idle" %}{{ st.label }}
+                    {% else %}올릴 변경 없음{% endif %}</p>
+                    {% if st.detail %}<p class="hint">{{ st.detail }}</p>{% endif %}
+                    {% if open_pr and pr %}<p class="ship-pr"><a href="{{ pr.url }}" target="_blank" rel="noopener">PR #{{ pr.number }}</a>{% if site.git.branch %} · {{ site.git.branch }}{% endif %}</p>{% endif %}
+                    {% if site.git.owner_wip %}<p class="hint warn">사장님 WIP {{ site.git.owner_wip|length }}개 · PR·배포 멈춤</p>{% endif %}
+                    {% if flow.review and open_pr and flow.reviewed %}
+                    <details class="ship-review {{ 'ok' if flow.verdict_ok else 'bad' }}"><summary>리뷰 {% if flow.verdict_ok %}통과{% else %}지적{% endif %}</summary><pre>{{ flow.review }}</pre></details>
+                    {% endif %}
+                    <div class="ship-now-actions">
+                        <form method="post" action="{{ url_for('site_autoship') }}" class="ss-auto" data-auto data-floor-label="{{ st.floor_label or cur_office.floor_label }}">
+                            <input type="hidden" name="on" value="{{ '0' if st.auto else '1' }}">
+                            <button type="submit" class="f3-toggle{% if st.auto %} on{% endif %}" title="{{ st.floor_label or cur_office.floor_label }} 전체 · PR·리뷰·머지·배포"><span></span>{{ st.floor_label or cur_office.floor_label }} 자동 진행 {{ '켬' if st.auto else '끔' }}</button>
+                        </form>
+                        {% if st.key == "check" %}
+                        <form method="post" action="{{ url_for('site_checked') }}" class="inline-form"><button class="act ghost small" type="submit">확인했어요</button></form>
+                        {% if st.url %}<a class="act ghost small" href="{{ st.url }}" target="_blank" rel="noopener">사이트 열기</a>{% endif %}
+                        {% endif %}
+                        {% if not st.auto or st.key == "stuck" %}
+                        <span class="ship-manual">
+                            {% if st.key == "changes" or (site.git.dirty and not open_pr) %}
+                            <form method="post" action="{{ url_for('site_ship_issue') }}" class="inline-form"><button class="act ghost small" type="submit"{% if site.git.owner_wip %} disabled{% endif %}>PR 만들기</button></form>
+                            {% endif %}
+                            {% if open_pr and not flow.reviewed %}
+                            <form method="post" action="{{ url_for('site_ship_review') }}" class="inline-form"><button class="act ghost small" type="submit">리뷰</button></form>
+                            {% endif %}
+                            {% if open_pr and flow.reviewed and flow.verdict_ok and not flow.merged %}
+                            <form method="post" action="{{ url_for('site_ship_merge') }}" class="inline-form"><button class="act ghost small" type="submit">머지</button></form>
+                            {% endif %}
+                            {% if open_pr and flow.reviewed and not flow.verdict_ok %}
+                            <form method="post" action="{{ url_for('site_ship_fix') }}" class="inline-form"><button class="act ghost small" type="submit">지적 고치기</button></form>
+                            <form method="post" action="{{ url_for('site_ship_merge') }}" class="inline-form"><button class="act ghost small" type="submit">그래도 머지</button></form>
+                            {% endif %}
+                            {% if flow.merged and not flow.deployed %}
+                            <form method="post" action="{{ url_for('site_ship_run') }}" class="inline-form"><button class="act ghost small" type="submit">올리기</button></form>
+                            {% endif %}
+                            {% if open_pr and not st.auto %}
+                            <form method="post" action="{{ url_for('site_ship_push') }}" class="inline-form"><button class="act ghost small" type="submit">푸시</button></form>
+                            {% endif %}
+                        </span>
+                        {% endif %}
+                    </div>
+                </div>
+            </section>
+
+            <section class="wf-block">
+                <header class="wf-head">
+                    <b>소스 정리</b>
+                    <span>필요할 때만</span>
+                </header>
+                <div class="ship-tools">
+                    <form method="post" action="{{ url_for('site_ship_refactor') }}">
+                        <input type="hidden" name="kind" value="optimize">
+                        <input type="hidden" name="area" value="all">
+                        <input type="hidden" name="hand_off" value="1">
+                        {{ go("refactor", "최적화", quiet=True, disabled=open_pr) }}
+                    </form>
+                    <form method="post" action="{{ url_for('site_ship_refactor') }}">
+                        <input type="hidden" name="kind" value="common">
+                        <input type="hidden" name="area" value="all">
+                        <input type="hidden" name="hand_off" value="1">
+                        {{ go("refactor", "공통화", quiet=True, disabled=open_pr) }}
+                    </form>
+                </div>
+                {% if open_pr %}<p class="hint">열린 PR #{{ pr.number }} 머지 뒤에 할 수 있어요.</p>{% endif %}
+                {% if refactor_last and refactor_last.files %}<p class="when">지난번 {{ refactor_last.files | length }}개 · {{ refactor_last.files[:3] | join(', ') }}{% if refactor_last.files|length > 3 %} …{% endif %}</p>{% endif %}
+                {% if auto %}
+                <form method="post" action="{{ url_for('site_ship_auto') }}" class="ship-autodev">
+                    <input type="hidden" name="on" value="{{ '0' if auto.on else '1' }}">
+                    <button class="act ghost small" type="submit">자동 최적화 {{ '끄기' if auto.on else '켜기' }}</button>
+                    <span class="when">{% if auto.checked %}마지막 {{ auto.checked }}{% endif %}{% if auto.note %} · {{ auto.note }}{% endif %}</span>
+                </form>
+                {% endif %}
+            </section>
+        </div>
+    {% endif %}
+    </section>
+    </div>
+    </aside>
+
+    <section class="bottom">
+        <div class="bottom-card glance-card">
+            <h3>한눈에</h3>
+            <div class="glance-wrap"><table class="glance-t">
+                <tr><th></th><th>상태</th><th>콘텐츠</th><th>열린 PR</th><th>마지막 배포</th></tr>
+                {% for g in glance %}
+                {% set pulse = g.pulse or {} %}
+                {% set pk = pulse.kind or 'idle' %}
+                <tr class="site-row{{ ' here' if g.site.id == cur_site.id }}{{ ' is-busy' if pk == 'work' }}{{ ' is-stuck' if pk == 'stuck' }}{{ ' is-held' if pk == 'held' }}{{ ' is-queued' if pk == 'queued' }}">
+                    <th><a href="{{ url_for('site_status', site=g.site.id) }}">{{ sico(g.site.id) }} {{ g.site.label }}</a></th>
+                    <td class="g-st">{% if pk != 'idle' and pulse.entries %}
+                        <button type="button" class="g-{{ 'work' if pk == 'work' else ('stuck' if pk == 'stuck' else ('held' if pk == 'held' else 'wait')) }} g-pulse" data-gpop="qpop-{{ g.site.id }}" data-track="ui:queue-pulse" data-track-detail="{{ g.site.id }}" title="눌러서 큐 내용 보기">{{ pulse.label }}</button>
+                        <template id="qpop-{{ g.site.id }}">
+                            <header class="gp-head">{{ sico(g.site.id) }}<b>{{ g.site.label }}</b><span class="gp-total">{{ pulse.label }}</span>
+                                {% if pulse.n_queued %}
+                                <button type="button" class="act ghost small qpop-go" data-queue-start data-queue-url="{{ url_for('site_queue_start', site=g.site.id) }}" data-track="ui:queue-start-all">대기 실행</button>
+                                {% endif %}
+                            </header>
+                            <ul class="qpop-list">
+                            {% for it in pulse.entries %}
+                                <li class="qpop-{{ it.status }}">
+                                    <div class="qpop-top"><b>{{ it.label or it.task }}</b>{% if it.who %}<span>{{ it.who }}</span>{% endif %}<i>{{ {'queued':'대기','running':'진행','held':'보류','failed':'실패'}.get(it.status, it.status) }}</i></div>
+                                    <p>{{ it.title }}</p>
+                                    {% if it.error %}<p class="qpop-err">{{ it.error }}</p>{% endif %}
+                                    {% if it.status == 'queued' and it.id %}
+                                    <p class="qpop-actions"><button type="button" class="act small qpop-go" data-queue-start data-queue-id="{{ it.id }}" data-queue-url="{{ url_for('site_queue_start', site=g.site.id) }}" data-track="ui:queue-start">지금 시작</button></p>
+                                    {% endif %}
+                                </li>
+                            {% endfor %}
+                            </ul>
+                            <p class="qpop-msg" data-qpop-msg hidden></p>
+                        </template>
+                        {% elif pk == 'work' %}<span class="g-work">작업중</span>
+                        {% elif pk == 'stuck' %}<span class="g-stuck">멈춤</span>
+                        {% elif pk == 'queued' %}<span class="g-wait">{{ pulse.label }}</span>
+                        {% elif pk == 'held' %}<span class="g-held">{{ pulse.label }}</span>
+                        {% else %}<span class="g-idle">—</span>{% endif %}</td>
+                    {% if g.ready %}
+                    <td><button type="button" class="g-count" data-gpop="gpop-{{ g.site.id }}" data-track="ui:glance" data-track-detail="{{ g.site.id }}" title="눌러서 종류·언어별 보기">{{ '{:,}'.format(g.posts) }}</button>
+                        {% set kmax = (g.kinds | map(attribute='n') | max) if g.kinds else 1 %}
+                        <template id="gpop-{{ g.site.id }}">
+                            <header class="gp-head">{{ sico(g.site.id) }}<b>{{ g.site.label }}</b><span class="gp-total">{{ '{:,}'.format(g.posts) }}<small>{{ '곳' if g.site.content == 'companydb' else '편' }}</small></span></header>
+                            {% if g.kinds %}<h4>종류</h4>
+                            <ul class="gp-bars">{% for k in g.kinds %}
+                                <li><span class="gp-l">{{ k.label }}</span><i class="gp-bar"><i style="width:{{ (100 * k.n / kmax) | round(1) }}%"></i></i><b>{{ '{:,}'.format(k.n) }}</b></li>{% endfor %}
+                            </ul>{% endif %}
+                            {% if g.langs %}<h4>언어</h4>
+                            <ul class="gp-langs">{% for l in g.langs %}
+                                <li class="{{ 'base' if l.base }}"><span class="gp-flag">{{ l.flag }}</span><span class="gp-l">{{ l.label }}{% if l.base %} <small>원본</small>{% endif %}</span><b>{{ '{:,}'.format(l.n) }}</b>{% if not l.base and g.posts %}<small class="gp-pct">{{ (100 * l.n / g.posts) | round | int }}%</small>{% endif %}</li>{% endfor %}
+                            </ul>{% endif %}
+                        </template></td>
+                    <td class="g-pr"><span class="g-pr-inner">{% if g.pr %}
+                        <a href="{{ g.pr.url }}" target="_blank" rel="noopener">#{{ g.pr.number }}</a>
+                        <form method="post" action="{{ url_for('site_run', site=g.site.id, task='review') }}" class="inline-form g-run" data-fetch>
+                            <button class="act ghost small" type="submit" title="{{ g.review or '리뷰·머지 큐에 담기' }}">리뷰</button>
+                        </form>
+                        {% else %}<span class="g-idle">—</span>{% endif %}</span></td>
+                    <td>{{ g.ship or '—' }}</td>
+                    {% else %}<td colspan="4" class="hint">아직 숫자를 안 모았어요 · 사이트를 한 번 열면 채워져요</td>{% endif %}
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="hint">연결된 사이트가 없어요.</td></tr>
+                {% endfor %}
+            </table></div>
+            <div class="gpop" id="gpop" hidden></div>
+        </div>
+        {% include "_money_card.html" %}
+        <div class="bottom-card activity-card{% if focus_team %} focus-team{% endif %}" id="feed-card"{% if focus_team %} data-team="{{ focus_team }}"{% endif %}>
+            <h3>지금 · 이벤트</h3>
+            <ul class="job-lines" id="job-lines">
+                {% for role, j in jobs.items() if j.line and role in staff and (not focus_team or staff[role].team == focus_team) %}
+                <li class="state-{{ 'work' if j.running else (j.state or 'done') }}{% if focus_team %} mine{% endif %}" data-role="{{ role }}" data-team="{{ staff[role].team }}">
+                    <span class="face">{{ chibi(staff[role], face=True) }}</span><b>{{ staff[role].name }}</b><small class="team-tag tone-{{ staff[role].team }}">{{ staff[role].team_name }}</small>{{ sico(j.site) }}<span data-text title="{{ j.line }}">{{ j.line }}</span>
+                </li>
+                {% endfor %}
+                {% if focus_team %}
+                {% for role, j in jobs.items() if j.line and role in staff and staff[role].team != focus_team %}
+                <li class="state-{{ 'work' if j.running else (j.state or 'done') }} other" data-role="{{ role }}" data-team="{{ staff[role].team }}">
+                    <span class="face">{{ chibi(staff[role], face=True) }}</span><b>{{ staff[role].name }}</b><small class="team-tag tone-{{ staff[role].team }}">{{ staff[role].team_name }}</small>{{ sico(j.site) }}<span data-text title="{{ j.line }}">{{ j.line }}</span>
+                </li>
+                {% endfor %}
+                {% endif %}
+            </ul>
+            <ol class="mini-feed" id="mini-feed">{% for row in office.feed[:8] %}
+                <li class="state-{{ row.state }}{% if row.site and row.site != cur_site.id %} other-site{% endif %}"{% if row.text %} data-tip="{{ row.text | e }}"{% endif %}>
+                    <span class="when">{{ row.at[-5:] if row.at|length > 5 else row.at }}</span>
+                    {% if row.site_label or row.site %}<span class="feed-site{% if row.site == cur_site.id %} here{% endif %}" title="{{ row.site_label or row.site }}">{{ sico(row.site) }}{{ row.site_label or row.site }}</span>
+                    {% else %}<span class="feed-site empty" aria-hidden="true"></span>{% endif %}
+                    <span class="feed-who">{% if row.face %}<span class="face"><img class="face-img" src="{{ url_for('static', filename=row.face) }}" alt="" width="18" height="18" loading="lazy"></span>{% else %}<span class="face empty" aria-hidden="true"></span>{% endif %}<b>{{ row.who }}</b></span>
+                    <span class="feed-text">{{ row.text }}</span>
+                </li>{% else %}<li class="hint">아직 없어요.</li>{% endfor %}</ol>
+            <p class="fresh" id="fresh" hidden>끝난 일이 있어요. <a href="{{ request.full_path }}">화면 새로고침</a></p>
+        </div>
+    </section>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<script>
+(function () {
+    // Every work button on the page is sent with fetch: the page stays where it is (no reload, drawer stays open).
+    // The answer says who took the work or why nobody could; the map shows them walking off right away.
+    const SKIP = /\/(refresh|tools\/restart|tools\/claude-login|login|logout)(\?|$)/;
+    const toast = document.getElementById("toast");
+    let toastT = null;
+    function say(msg, ok) {
+        toast.textContent = (ok ? "✅ " : "⚠️ ") + msg;
+        toast.className = "toast " + (ok ? "ok" : "bad");
+        toast.hidden = false;
+        clearTimeout(toastT);
+        toastT = setTimeout(() => { toast.hidden = true; }, ok ? 3500 : 6000);
+    }
+    window.hqSay = say;
+    document.querySelectorAll("form[data-auto]").forEach((f) => f.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const on = f.querySelector('[name="on"]').value === "1";
+        let out = null;
+        try { out = await fetch(f.action, { method: "POST", body: new FormData(f), headers: { "X-Requested-With": "fetch" } }).then((r) => r.json()); } catch (_) {}
+        if (!out) return say("바꾸지 못했어요", false);
+        say(out.msg, true);
+        const b = f.querySelector("button");
+        const fl = f.getAttribute("data-floor-label") || (out && out.floor_label) || "";
+        const label = (fl ? fl + " " : "") + "자동 진행 " + (on ? "켬" : "끔");
+        b.classList.toggle("on", on); b.lastChild.textContent = label;
+        f.querySelector('[name="on"]').value = on ? "0" : "1";
+        // Same floor toggles elsewhere (header · 상세) stay in sync
+        document.querySelectorAll("form[data-auto]").forEach((other) => {
+            if (other === f) return;
+            const oFl = other.getAttribute("data-floor-label") || "";
+            if (fl && oFl && oFl !== fl) return;
+            if (out && out.office && other.dataset.office && other.dataset.office !== out.office) return;
+            const ob = other.querySelector("button");
+            const oh = other.querySelector('[name="on"]');
+            if (!ob || !oh) return;
+            ob.classList.toggle("on", on);
+            const ofl = other.getAttribute("data-floor-label") || fl;
+            ob.lastChild.textContent = (ofl ? ofl + " " : "") + "자동 진행 " + (on ? "켬" : "끔");
+            oh.value = on ? "0" : "1";
+        });
+    }));
+    document.addEventListener("submit", async (ev) => {
+        const form = ev.target;
+        if (ev.defaultPrevented || !(form instanceof HTMLFormElement) || (form.method || "").toLowerCase() !== "post") return;
+        if (form.hasAttribute("data-nofetch") || SKIP.test(new URL(form.action, location.href).pathname)) return;
+        ev.preventDefault();
+        const btn = ev.submitter && ev.submitter.tagName === "BUTTON" ? ev.submitter : form.querySelector('button[type="submit"], button:not([type])');
+        const body = new FormData(form);
+        if (ev.submitter && ev.submitter.name) body.append(ev.submitter.name, ev.submitter.value);
+        const label = btn ? btn.innerHTML : "";
+        if (btn) { btn.disabled = true; btn.classList.add("sending"); }
+        let out = null, res = null;
+        try {
+            res = await fetch(form.action, { method: "POST", body, headers: { "X-Requested-With": "fetch" } });
+            if ((res.headers.get("content-type") || "").includes("json")) out = await res.json();
+        } catch (_) {}
+        if (btn) btn.classList.remove("sending");
+        if (!out) {   // a route that only knows redirects: follow it (as before)
+            if (res && res.redirected) { location.assign(res.url); return; }
+            if (btn) { btn.disabled = false; btn.innerHTML = label; }
+            say(res ? `처리하지 못했어요 (HTTP ${res.status})` : "서버에 닿지 못했어요", false);
+            return;
+        }
+        say(out.msg || out.message || (out.ok ? "했어요" : "못 했어요"), !!out.ok);
+        if (out.ok && form.id === "own-form") {   // own file uploaded: show the new picture
+            const nm = (form.querySelector('[name="name"]') || {}).value, v = "?v=" + Date.now();
+            document.querySelectorAll(`.tile[data-name="${CSS.escape(nm || "")}"] img`).forEach((i) => { i.src = i.src.split("?")[0] + v; });
+        }
+        if (out.ok && ((out.who && out.who.length) || out.message)) {
+            if (btn) { btn.innerHTML = "✓ 맡겼어요"; }   // stays off until you refresh (끝난 일 → 화면 새로고침)
+            document.dispatchEvent(new Event("office:poke"));
+            form.querySelectorAll('textarea, input[type="text"]').forEach((f) => { f.defaultValue = f.value; });
+        } else if (btn) { btn.disabled = false; btn.innerHTML = label; }
+    });
+})();
+(function () {
+    // 👥 사원 / 👆 HQ: small cards under the header buttons
+    function wirePop(btnId, popId, afterOpen) {
+        const btn = document.getElementById(btnId), pop = document.getElementById(popId);
+        if (!btn || !pop) return;
+        function close() { pop.hidden = true; btn.classList.remove("on"); }
+        async function open() {
+            try { pop.innerHTML = await fetch(btn.dataset.url).then((r) => r.text()); }
+            catch (_) { pop.innerHTML = '<p class="hint">불러오지 못했어요.</p>'; }
+            if (afterOpen) afterOpen(pop);
+            pop.hidden = false; btn.classList.add("on");
+            const r = btn.getBoundingClientRect();
+            pop.style.top = (r.bottom + 8) + "px";
+            pop.style.left = Math.max(8, Math.min(r.left + r.width / 2 - pop.offsetWidth / 2, innerWidth - pop.offsetWidth - 8)) + "px";
+        }
+        btn.addEventListener("click", (ev) => { ev.stopPropagation(); pop.hidden ? open() : close(); });
+        document.addEventListener("click", (ev) => { if (!pop.hidden && !pop.contains(ev.target) && ev.target !== btn) close(); });
+        document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
+        return pop;
+    }
+    let floor = null;
+    const staffPop = wirePop("staff-btn", "staff-pop", (pop) => {
+        function pick(id) {
+            floor = id;
+            pop.querySelectorAll("[data-sp-floor]").forEach((b) => b.classList.toggle("on", b.dataset.spFloor === id));
+            pop.querySelectorAll(".sp-floor").forEach((sec) => { sec.hidden = sec.dataset.floor !== id; });
+        }
+        const tabs = pop.querySelector(".sp-floor-tabs");
+        pick(floor || (tabs && tabs.dataset.here) || "");
+        pop.onclick = (ev) => { const b = ev.target.closest("[data-sp-floor]"); if (b) pick(b.dataset.spFloor); };
+    });
+    wirePop("usage-btn", "usage-pop");
+    void staffPop;
+})();
+(function () {
+    // 📊 트래픽 · 검색: paint first, then soft cache fetch (no live GA/GSC). ↻ = fresh=1.
+    let trafficCtl = null;
+    function trafficSwap(url) {
+        const card = document.getElementById("traffic-card");
+        if (!card) return;
+        card.classList.add("loading");
+        if (trafficCtl) try { trafficCtl.abort(); } catch (_) {}
+        trafficCtl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+        const t = setTimeout(() => { try { trafficCtl && trafficCtl.abort(); } catch (_) {} }, 12000);
+        fetch(url, trafficCtl ? { signal: trafficCtl.signal } : undefined).then((r) => r.text()).then((html) => {
+            clearTimeout(t);
+            const box = document.createElement("div");
+            box.innerHTML = html.trim();
+            const next = box.querySelector("#traffic-card") || box.firstElementChild;
+            if (next) {
+                card.replaceWith(next);
+                trafficWire(next);
+                box.querySelectorAll("script").forEach((old) => {
+                    const s = document.createElement("script");
+                    if (old.src) s.src = old.src; else s.textContent = old.textContent;
+                    document.body.appendChild(s);
+                });
+            }
+        }).catch(() => {
+            clearTimeout(t);
+            card.classList.remove("loading");
+            const h = card.querySelector(".hint");
+            if (h) h.textContent = "불러오지 못했어요. ↻로 다시 받아 보세요.";
+        });
+    }
+    function trafficWire(card) {
+        if (!card) return;
+        const btn = card.querySelector(".traffic-refresh");
+        if (btn) btn.addEventListener("click", () => {
+            btn.disabled = true;
+            trafficSwap((card.dataset.url || "") + (card.dataset.url.includes("?") ? "&" : "?") + "fresh=1");
+        });
+    }
+    const card = document.getElementById("traffic-card");
+    if (card) {
+        trafficWire(card);
+        if (card.dataset.stale) {
+            const go = () => trafficSwap(card.dataset.url);
+            if (typeof requestIdleCallback === "function") requestIdleCallback(go, { timeout: 1200 });
+            else setTimeout(go, 0);
+        }
+    }
+})();
+(function () {
+    // 한눈에: 콘텐츠 숫자 · 대기/멈춤 큐 팝업 (+ 지금 시작)
+    const pop = document.getElementById("gpop");
+    let openBtn = null;
+    function closePop() { if (pop) pop.hidden = true; if (openBtn) openBtn.classList.remove("on"); openBtn = null; }
+    document.querySelectorAll("[data-gpop]").forEach((btn) => btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (openBtn === btn) return closePop();
+        closePop();
+        const tpl = document.getElementById(btn.dataset.gpop);
+        if (!pop || !tpl) return;
+        pop.replaceChildren(tpl.content.cloneNode(true));
+        pop.hidden = false;
+        const r = btn.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+        let left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), innerWidth - w - 8);
+        let top = r.bottom + 8;
+        if (top + h > innerHeight - 8) top = Math.max(8, r.top - h - 8);
+        pop.style.left = left + "px"; pop.style.top = top + "px";
+        btn.classList.add("on"); openBtn = btn;
+    }));
+    if (pop) pop.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("[data-queue-start]");
+        if (!btn) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const url = btn.dataset.queueUrl;
+        if (!url) return;
+        btn.disabled = true;
+        const body = new FormData();
+        if (btn.dataset.queueId) body.set("id", btn.dataset.queueId);
+        let out = { ok: false, msg: "시작하지 못했어요" };
+        try {
+            out = await fetch(url, { method: "POST", body, headers: { "X-Requested-With": "fetch" } }).then((r) => r.json());
+        } catch (_) {}
+        const text = out.msg || out.message || (out.ok ? "시작했어요" : "시작하지 못했어요");
+        const msg = pop.querySelector("[data-qpop-msg]");
+        if (msg) { msg.textContent = text; msg.hidden = false; msg.classList.toggle("bad", !out.ok); }
+        if (window.hqSay) window.hqSay(text, !!out.ok);
+        if (out.ok && out.started) {
+            btn.textContent = "시작됨";
+            btn.classList.add("ghost");
+            document.dispatchEvent(new Event("office:poke"));
+        } else {
+            btn.disabled = false;
+        }
+    });
+    document.addEventListener("click", (ev) => { if (pop && !pop.hidden && !pop.contains(ev.target)) closePop(); });
+    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closePop(); });
+    addEventListener("scroll", closePop, { passive: true });
+})();
+(function () {
+    // Team-tab detail panel: default open under tabs (office map stays visible).
+    const drawer = document.getElementById("drawer");
+    const detailReopen = document.getElementById("detail-reopen");
+    const SCROLL_KEY = "okn.drawerScroll";
+    function taskEl() { return drawer && drawer.querySelector(".task"); }
+    function scrollDrawerTop() {
+        const t = taskEl();
+        if (t) t.scrollTop = 0;
+        try { sessionStorage.removeItem(SCROLL_KEY); } catch (_) {}
+    }
+    function setDrawer(open, opts) {
+        if (!drawer) return;
+        drawer.classList.toggle("open", open);
+        if (detailReopen) detailReopen.hidden = open;
+        document.querySelector(".side")?.classList.toggle("drawer-collapsed", !open && !!detailReopen);
+        try { history.replaceState(null, "", open ? "#d" : location.pathname + location.search); } catch (_) {}
+        if (open && !(opts && opts.keepScroll)) scrollDrawerTop();
+    }
+    document.querySelectorAll("[data-drawer-top]").forEach((a) => a.addEventListener("click", () => {
+        try { sessionStorage.removeItem(SCROLL_KEY); } catch (_) {}
+    }));
+    if (drawer && (location.hash === "#d" || location.hash === "#polish" || drawer.dataset.open)) {
+        const keep = (function () {
+            try {
+                const s = JSON.parse(sessionStorage.getItem(SCROLL_KEY) || "null");
+                return s && s.path === location.pathname && s.search === location.search;
+            } catch (_) { return false; }
+        })();
+        setDrawer(true, { keepScroll: keep });
+        if (location.hash === "#polish") {
+            requestAnimationFrame(() => { const el = document.getElementById("polish"); if (el) el.scrollIntoView({ block: "start" }); });
+        } else if (!keep) {
+            requestAnimationFrame(scrollDrawerTop);
+        }
+    } else if (detailReopen) {
+        detailReopen.hidden = false;
+        document.querySelector(".side")?.classList.add("drawer-collapsed");
+    }
+    document.querySelectorAll("[data-open-drawer]").forEach((b) => b.addEventListener("click", () => setDrawer(true)));
+    document.querySelectorAll("[data-close-drawer]").forEach((b) => b.addEventListener("click", () => setDrawer(false)));
+    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && drawer && drawer.classList.contains("open")) setDrawer(false); });
+    // Team tab summary: busy badge + face lines follow the map poll (no separate now-run list).
+    const teamSum = document.querySelector(".team-sum");
+    if (teamSum) {
+        const members = {{ (quick.people | map(attribute='id') | list if quick else []) | tojson }};
+        const titles = {{ (quick.people | map(attribute='title') | list if quick else []) | tojson }};
+        const tsBusy = document.getElementById("ts-busy");
+        document.addEventListener("office:update", (ev) => {
+            if (!(ev.detail || {}).jobs) return;
+            const all = ev.detail.jobs;
+            const busy = members.filter((m) => all[m] && all[m].running);
+            if (tsBusy) {
+                tsBusy.classList.toggle("on", busy.length > 0);
+                tsBusy.textContent = busy.length ? `▶ ${busy.length}명 작업` : "쉬는 중";
+            }
+            members.forEach((m, i) => {
+                const qp = teamSum.querySelector(`.qp[data-role="${m}"]`);
+                if (!qp) return;
+                const j = all[m] || {};
+                const on = !!j.running;
+                qp.classList.toggle("busy", on);
+                const sm = qp.querySelector("[data-line]");
+                if (sm) sm.textContent = on ? String(j.line || "").slice(0, 22) : (titles[i] || "");
+            });
+        });
+    }
+    // Filter chips + page size for long pick lists (마케팀 고칠 글).
+    document.querySelectorAll("[data-pick-list]").forEach((root) => {
+        const page = Math.max(10, parseInt(root.dataset.page || "30", 10) || 30);
+        const items = [...root.querySelectorAll("li[data-tags]")];
+        const more = root.querySelector(".pick-more");
+        let filter = root.dataset.filter || "focus";
+        let limit = page;
+        const tagsOf = (li) => (li.dataset.tags || "").trim().split(/\s+/).filter(Boolean);
+        const focusOf = (tags) => tags.includes("ai") || tags.includes("low_ctr") || tags.includes("gsc");
+        const anyFocus = items.some((li) => focusOf(tagsOf(li)));
+        function match(li) {
+            const tags = tagsOf(li);
+            if (filter === "all") return true;
+            if (filter === "focus") return anyFocus ? focusOf(tags) : true;
+            return tags.includes(filter);
+        }
+        function paint() {
+            let shown = 0, matched = 0;
+            items.forEach((li) => {
+                const ok = match(li);
+                if (!ok) { li.hidden = true; return; }
+                matched += 1;
+                const vis = shown < limit;
+                li.hidden = !vis;
+                if (vis) shown += 1;
+            });
+            if (more) {
+                const left = matched - shown;
+                more.hidden = left <= 0;
+                more.textContent = left > 0 ? `더 보기 · ${Math.min(page, left)}편 (남은 ${left})` : "";
+            }
+            root.dispatchEvent(new Event("pick-list:change"));
+        }
+        const scroller = root.closest(".drawer .task") || root.closest(".task") || document.scrollingElement;
+        root.querySelectorAll(".pick-f").forEach((btn) => {
+            btn.addEventListener("click", (ev) => {
+                ev.preventDefault();
+                const pin = btn.getBoundingClientRect().top;
+                filter = btn.dataset.filter || "all";
+                root.dataset.filter = filter;
+                limit = page;
+                root.querySelectorAll(".pick-f").forEach((b) => b.classList.toggle("on", b === btn));
+                paint();
+                const stick = () => {
+                    if (!scroller) return;
+                    const dy = btn.getBoundingClientRect().top - pin;
+                    if (Math.abs(dy) > 1) scroller.scrollTop += dy;
+                };
+                stick();
+                requestAnimationFrame(stick);
+            });
+        });
+        if (more) more.addEventListener("click", () => { limit += page; paint(); });
+        const start = root.querySelector(`.pick-f[data-filter="${filter}"]`) || root.querySelector(".pick-f");
+        if (start) root.querySelectorAll(".pick-f").forEach((b) => b.classList.toggle("on", b === start));
+        paint();
+    });
+    // Lists with checkboxes (마케팀): inputs may sit outside the <form> via form="…".
+    // Filter change auto-picks up to 15 of what's visible.
+    document.querySelectorAll(".limit-form").forEach((form) => {
+        const name = form.dataset.name;
+        const fid = form.id;
+        const boxes = [...document.querySelectorAll(`input[name="${name}"][form="${fid}"]:not([data-busy]), #${fid} input[name="${name}"]:not([data-busy])`)];
+        const btn = (form.dataset.go && document.getElementById(form.dataset.go))
+            || document.querySelector(`button[type="submit"][form="${fid}"]`)
+            || form.querySelector('button[type="submit"]:not([disabled])');
+        const label = btn ? btn.textContent.trim().replace(/\s*\(\d+편\)\s*$/, "") : "";
+        const autoPick = form.dataset.autoPick === "1";
+        const countEl = form.dataset.countEl ? document.getElementById(form.dataset.countEl) : form.querySelector("[data-count]");
+        const lists = [...document.querySelectorAll(`[data-pick-list][data-form="${fid}"]`)];
+        const visibleBoxes = () => boxes.filter((b) => {
+            const li = b.closest("li");
+            return li && !li.hidden;
+        });
+        function sync() {
+            const on = boxes.filter((b) => b.checked).length;
+            boxes.forEach((b) => { b.disabled = !b.checked && on >= 15; });
+            if (btn) { btn.textContent = `${label} (${on}편)`; btn.disabled = on === 0; }
+            if (countEl) countEl.textContent = on ? `${on}편 골랐어요 · 최대 15편` : "필터 바꾸면 위 15편 자동 · 체크도 가능";
+        }
+        function pickVisible() {
+            if (!autoPick) return;
+            boxes.forEach((x) => { x.checked = false; x.disabled = false; });
+            visibleBoxes().slice(0, 15).forEach((x) => { x.checked = true; });
+            sync();
+        }
+        boxes.forEach((b) => b.addEventListener("change", sync));
+        lists.forEach((root) => {
+            root.addEventListener("pick-list:change", () => {
+                if (autoPick) pickVisible();
+                else sync();
+            });
+        });
+        const first = boxes.find((b) => b.checked);
+        if (first && new URLSearchParams(location.search).get("pick")) first.closest("li").scrollIntoView({ block: "center" });
+        if (autoPick) pickVisible();
+        else sync();
+    });
+    // Picks: count on the submit button, max 15.
+    const pf = document.getElementById("picks-form");
+    if (pf) {
+        const boxes = [...pf.querySelectorAll('input[name="pick"]:not([disabled])')];
+        const btn = pf.querySelector('button[type="submit"]');
+        const label = btn ? btn.textContent.trim() : "";
+        const sync = () => {
+            const on = boxes.filter((b) => b.checked).length;
+            boxes.forEach((b) => { b.disabled = !b.checked && on >= 15; });
+            if (btn) { btn.textContent = `${label} (${on}{{ cur_site.words.unit }})`; btn.disabled = on === 0; }
+        };
+        boxes.forEach((b) => b.addEventListener("change", sync));
+        const all = document.getElementById("pick-all");
+        if (all) all.addEventListener("click", () => { boxes.slice(0, 15).forEach((b) => { b.checked = true; }); sync(); });
+        sync();
+    }
+    // Seed keywords: pick at most data-max from the pool.
+    document.querySelectorAll(".seed-chips[data-max]").forEach((box) => {
+        const max = Math.max(1, parseInt(box.dataset.max || "8", 10) || 8);
+        const boxes = [...box.querySelectorAll('input[name="seed"]')];
+        const sync = () => {
+            const on = boxes.filter((b) => b.checked).length;
+            boxes.forEach((b) => { b.disabled = !b.checked && on >= max; });
+        };
+        boxes.forEach((b) => b.addEventListener("change", sync));
+        sync();
+    });
+    // Images: gallery pick · bottom actions (후보 / AI / 내 파일). No preview panel.
+    document.querySelectorAll("[data-img-pick]").forEach((root) => {
+        const page = Math.max(10, parseInt(root.dataset.page || "30", 10) || 30);
+        const items = [...root.querySelectorAll("li[data-tags]")];
+        const more = root.querySelector(".pick-more");
+        const q = root.querySelector("#tile-q");
+        const countEl = document.getElementById("tile-n");
+        const go = document.getElementById("img-go");
+        const aiOpen = document.getElementById("img-ai-open");
+        const aiPop = document.getElementById("ai-pop");
+        const aiHint = document.getElementById("img-ai-hint");
+        const aiCancel = document.getElementById("img-ai-cancel");
+        const aiName = document.getElementById("ai-pop-name");
+        const ownFile = document.getElementById("own-file");
+        const ownInput = ownFile && ownFile.querySelector('input[type="file"]');
+        const busy = go && /일하는 중|모두 일하는/.test(go.textContent);
+        if (aiPop) document.body.appendChild(aiPop);
+        let filter = root.dataset.filter || "all";
+        let limit = page;
+        let cur = -1;
+        function closeAi() {
+            if (aiPop) aiPop.hidden = true;
+            if (aiHint) aiHint.value = "";
+        }
+        function openAi() {
+            const name = document.getElementById("picked-input")?.value;
+            if (!name || !aiPop) return;
+            if (aiName) aiName.textContent = document.getElementById("picked-name")?.textContent || name;
+            aiPop.hidden = false;
+            if (aiHint) { aiHint.focus(); aiHint.select(); }
+        }
+        const tagsOf = (li) => (li.dataset.tags || "").trim().split(/\s+/).filter(Boolean);
+        const query = () => (q ? q.value.trim().toLowerCase() : "");
+        function match(li) {
+            const tags = tagsOf(li);
+            if (filter !== "all" && !tags.includes(filter)) return false;
+            const w = query();
+            return !w || (li.dataset.q || "").includes(w);
+        }
+        function matched() { return items.filter(match); }
+        function paint() {
+            const all = matched();
+            let shown = 0;
+            items.forEach((li) => {
+                const ok = match(li);
+                if (!ok) { li.hidden = true; return; }
+                const vis = shown < limit;
+                li.hidden = !vis;
+                if (vis) shown += 1;
+            });
+            if (more) {
+                const left = all.length - shown;
+                more.hidden = left <= 0;
+                more.textContent = left > 0 ? `더 보기 · ${Math.min(page, left)}장 (남은 ${left})` : "";
+            }
+            if (countEl) countEl.textContent = query() || filter !== "all"
+                ? `${all.length}장 · 목록 ${Math.min(shown, all.length)}`
+                : "";
+            if (cur >= 0) {
+                const name = items[cur] && items[cur].querySelector(".tile")?.dataset.name;
+                const idx = all.findIndex((li) => li.querySelector(".tile")?.dataset.name === name);
+                if (idx < 0) clearPick();
+                else {
+                    cur = items.indexOf(all[idx]);
+                    if (all[idx].hidden) { limit = Math.max(limit, idx + 1); paint(); }
+                }
+            }
+        }
+        function clearPick() {
+            cur = -1;
+            document.querySelectorAll(".tile.on").forEach((t) => t.classList.remove("on"));
+            const pn = document.getElementById("picked-name");
+            if (pn) { pn.textContent = ""; pn.hidden = true; }
+            const pi = document.getElementById("picked-input"); if (pi) pi.value = "";
+            const on = document.getElementById("own-name"); if (on) on.value = "";
+            if (ownInput) ownInput.disabled = true;
+            const co = document.getElementById("cand-open"); if (co) { co.disabled = true; co.hidden = false; }
+            if (aiOpen) aiOpen.disabled = true;
+            closeAi();
+        }
+        function selectTile(tile, { scrollTile = true } = {}) {
+            if (!tile) return;
+            const li = tile.closest("li");
+            cur = items.indexOf(li);
+            document.querySelectorAll(".tile.on").forEach((t) => t.classList.remove("on"));
+            tile.classList.add("on");
+            const title = tile.querySelector("b");
+            const name = tile.dataset.name;
+            const pn = document.getElementById("picked-name");
+            if (pn) { pn.textContent = (title && title.textContent) || name; pn.hidden = false; }
+            const pi = document.getElementById("picked-input"); if (pi) pi.value = name;
+            document.getElementById("own-name").value = name;
+            if (ownInput) ownInput.disabled = false;
+            closeAi();
+            const co = document.getElementById("cand-open");
+            if (co) { co.hidden = false; co.disabled = !tile.dataset.pick; }
+            if (aiOpen) aiOpen.disabled = !!busy;
+            if (scrollTile) li.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+        root.querySelectorAll(".pick-f").forEach((btn) => {
+            btn.addEventListener("click", (ev) => {
+                ev.preventDefault();
+                const pin = btn.getBoundingClientRect().top;
+                const sc = root.closest(".drawer .task") || root.closest(".task");
+                filter = btn.dataset.filter || "all";
+                root.dataset.filter = filter;
+                limit = page;
+                root.querySelectorAll(".pick-f").forEach((b) => b.classList.toggle("on", b === btn));
+                paint();
+                if (sc) {
+                    const stick = () => {
+                        const dy = btn.getBoundingClientRect().top - pin;
+                        if (Math.abs(dy) > 1) sc.scrollTop += dy;
+                    };
+                    stick();
+                    requestAnimationFrame(stick);
+                }
+            });
+        });
+        if (q) q.addEventListener("input", () => { limit = page; paint(); });
+        if (more) more.addEventListener("click", () => { limit += page; paint(); });
+        if (aiOpen) aiOpen.addEventListener("click", openAi);
+        if (aiCancel) aiCancel.addEventListener("click", closeAi);
+        if (aiPop) {
+            aiPop.addEventListener("click", (ev) => { if (ev.target === aiPop) closeAi(); });
+        }
+        root.querySelectorAll(".tile").forEach((tile) => {
+            tile.addEventListener("click", () => selectTile(tile));
+        });
+        document.addEventListener("keydown", (ev) => {
+            if (aiPop && !aiPop.hidden && ev.key === "Escape") closeAi();
+        });
+        paint();
+    });
+    // Job lines follow the map's poll. When someone finishes, offer a refresh link (no auto reload).
+    const list = document.getElementById("job-lines");
+    const nowCard = list ? list.closest(".activity-card, .now-card") : null;
+    const focusTeam = (nowCard && nowCard.dataset.team) || "";
+    const ICON_URL = {{ url_for('site_icon', sid='SID') | tojson }};
+    const STATIC_BASE = {{ url_for('static', filename='') | tojson }};
+    const SITE_LABEL = {};
+    {% for s in all_sites.values() %}SITE_LABEL[{{ s.id | tojson }}] = {{ s.label | tojson }};{% endfor %}
+    const TEAM_OF = {};
+    {% for r in staff.values() %}TEAM_OF[{{ r.id | tojson }}] = { team: {{ r.team | tojson }}, name: {{ r.team_name | tojson }} };{% endfor %}
+    const fresh = document.getElementById("fresh");
+    let was = {};
+    {% for role, j in jobs.items() %}was[{{ role|tojson }}] = {{ (j.running or False)|tojson }};{% endfor %}
+    // Someone finished: banner only (no toast — short autoship jobs finish in bursts). Never auto-reload.
+    // Drawer scroll: keep only across same path+query refresh (not when opening / changing day).
+    const DRAWER_SCROLL_KEY = "okn.drawerScroll";
+    function keepScroll() {
+        const t = document.querySelector(".drawer.open .task");
+        try {
+            sessionStorage.setItem(DRAWER_SCROLL_KEY, JSON.stringify({
+                path: location.pathname, search: location.search, top: t ? t.scrollTop : 0, y: scrollY
+            }));
+        } catch (_) {}
+    }
+    addEventListener("pagehide", keepScroll);
+    try {
+        const s = JSON.parse(sessionStorage.getItem(DRAWER_SCROLL_KEY) || "null");
+        if (s && s.path === location.pathname && s.search === location.search) {
+            requestAnimationFrame(() => {
+                const t = document.querySelector(".drawer.open .task");
+                if (t && s.top) t.scrollTop = s.top;
+                if (s.y) scrollTo(0, s.y);
+            });
+        }
+    } catch (_) {}
+    function escFeed(s) {
+        return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
+    }
+    // Full event text on hover (fixed tip — survives card overflow / ellipsis).
+    (function () {
+        const mini = document.getElementById("mini-feed");
+        if (!mini) return;
+        const tip = document.createElement("div");
+        tip.className = "feed-tip-pop";
+        tip.hidden = true;
+        tip.setAttribute("role", "tooltip");
+        document.body.appendChild(tip);
+        let on = null;
+        function place(li) {
+            const text = li.getAttribute("data-tip") || "";
+            if (!text) { tip.hidden = true; on = null; return; }
+            tip.textContent = text;
+            tip.hidden = false;
+            on = li;
+            const r = li.getBoundingClientRect();
+            const w = Math.min(Math.max(r.width, 220), 420);
+            let left = r.left;
+            if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
+            tip.style.width = w + "px";
+            tip.style.left = Math.max(8, left) + "px";
+            const below = r.bottom + 8;
+            tip.style.top = below + "px";
+            requestAnimationFrame(() => {
+                const th = tip.offsetHeight;
+                if (below + th > window.innerHeight - 8 && r.top - th - 8 > 8) {
+                    tip.style.top = (r.top - th - 8) + "px";
+                }
+            });
+        }
+        mini.addEventListener("pointerover", (ev) => {
+            const li = ev.target.closest("li[data-tip]");
+            if (li && li !== on) place(li);
+        });
+        mini.addEventListener("pointerout", (ev) => {
+            const li = ev.target.closest("li[data-tip]");
+            if (!li || li.contains(ev.relatedTarget)) return;
+            tip.hidden = true; on = null;
+        });
+        addEventListener("scroll", () => { if (on) place(on); }, true);
+    })();
+    document.addEventListener("office:update", (ev) => {
+        const office = (ev.detail || {}).office || {};
+        const mini = document.getElementById("mini-feed");
+        if (mini && office.feed) {
+            const here = {{ cur_site.id | tojson }};
+            mini.innerHTML = office.feed.slice(0, 8).map((row) => {
+                const site = row.site_label || row.site || "";
+                const other = row.site && row.site !== here ? " other-site" : "";
+                const hereCls = row.site === here ? " here" : "";
+                const siteHtml = site
+                    ? `<span class="feed-site${hereCls}" title="${escFeed(site)}"><img class="site-ico" width="12" height="12" src="${ICON_URL.replace("SID", encodeURIComponent(row.site || ""))}" alt="">${escFeed(site)}</span>`
+                    : `<span class="feed-site empty" aria-hidden="true"></span>`;
+                const faceSrc = row.face ? (STATIC_BASE + row.face) : "";
+                const whoHtml = `<span class="feed-who">${faceSrc ? `<span class="face"><img class="face-img" src="${escFeed(faceSrc)}" alt="" width="18" height="18"></span>` : `<span class="face empty" aria-hidden="true"></span>`}<b>${escFeed(row.who)}</b></span>`;
+                const when = (row.at || "").length > 5 ? String(row.at).slice(-5) : (row.at || "");
+                const text = row.text || "";
+                const tip = text ? ` data-tip="${escFeed(text)}"` : "";
+                return `<li class="state-${escFeed(row.state)}${other}"${tip}><span class="when">${escFeed(when)}</span>${siteHtml}${whoHtml}<span class="feed-text">${escFeed(text)}</span></li>`;
+            }).join("") || `<li class="hint">아직 없어요.</li>`;
+        }
+        const all = (ev.detail || {}).jobs;
+        if (!all || !list) return;
+        let finished = false;
+        for (const role in all) {
+            const j = all[role];
+            let li = list.querySelector(`li[data-role="${role}"]`);
+            if (!li && j.line && TEAM_OF[role]) {   // this floor's people only
+                const tpl = document.querySelector(`.walker[data-role="${role}"] .walker-name`);
+                li = document.createElement("li");
+                li.dataset.role = role;
+                li.innerHTML = `<span class="face"></span><b></b><small class="team-tag"></small><img class="site-ico" width="16" height="16" alt="" hidden><span data-text></span>`;
+                li.querySelector("b").textContent = tpl ? tpl.textContent : role;
+                const tm = TEAM_OF[role] || {};
+                li.dataset.team = tm.team || "";
+                li.querySelector(".team-tag").textContent = tm.name || "";
+                if (tm.team) li.querySelector(".team-tag").classList.add("tone-" + tm.team);
+                // keep focus-team rows first
+                if (focusTeam && tm.team === focusTeam) {
+                    const firstOther = list.querySelector("li.other");
+                    list.insertBefore(li, firstOther || null);
+                } else {
+                    list.appendChild(li);
+                }
+            }
+            if (li) {
+                const tm = TEAM_OF[role] || {};
+                const focusCls = focusTeam ? (tm.team === focusTeam ? " mine" : " other") : "";
+                li.className = "state-" + (j.running ? "work" : (j.state || "done")) + focusCls;
+                li.querySelector("[data-text]").textContent = j.line || "";
+                li.querySelector("[data-text]").title = j.line || "";
+                const ico = li.querySelector(".site-ico");
+                if (ico && j.site && SITE_LABEL[j.site]) {   // which site this job is for
+                    const src = ICON_URL.replace("SID", j.site);
+                    if (ico.getAttribute("src") !== src) ico.setAttribute("src", src);
+                    ico.alt = ico.title = SITE_LABEL[j.site];
+                    ico.hidden = false;
+                }
+            }
+            if (was[role] && !j.running) finished = true;
+            was[role] = !!j.running;
+        }
+        if (finished && fresh) fresh.hidden = false;
+    });
+    // 회의 제안 → 실행 큐
+    document.querySelectorAll(".idea-form").forEach((form) => {
+        form.addEventListener("submit", async (ev) => {
+            ev.preventDefault();
+            const btn = form.querySelector("button");
+            const msg = form.querySelector("[data-msg]");
+            btn.disabled = true;
+            let out = { ok: false, message: "담지 못했어요" };
+            try {
+                out = await fetch(form.action, { method: "POST", body: new FormData(form), headers: { "X-Requested-With": "fetch" } }).then((r) => r.json());
+            } catch (_) {}
+            const text = out.message || out.msg || (out.ok ? "큐에 담았어요" : "담지 못했어요");
+            if (msg) { msg.textContent = text; msg.hidden = false; msg.classList.toggle("bad", !out.ok); }
+            if (window.hqSay) window.hqSay(text, !!out.ok);
+            if (out.ok) {
+                btn.textContent = "담김";
+                btn.classList.add("ghost");
+                document.dispatchEvent(new Event("office:poke"));
+            } else btn.disabled = false;
+        });
+    });
+    // 💴 어필리에이트: reload the numbers or enter this month's without leaving the page
+    function affWire(card) {
+        if (!card) return;
+        card.querySelectorAll("[data-aff-do]").forEach((b) => b.addEventListener("click", () => {
+            b.disabled = true;
+            affSwap(fetch(b.dataset.affDo, { method: "POST", headers: { "X-Requested-With": "fetch" } }).then((r) => r.text()));
+        }));
+        if (card.dataset.affBusy) setTimeout(() => affSwap(fetch(AFF_URL).then((r) => r.text())), 8000);   // follow the fetch
+        card.querySelectorAll("[data-aff-edit]").forEach((b) => b.addEventListener("click", () => {
+            const f = card.querySelector("[data-aff-form]");
+            if (f) f.hidden = !f.hidden;
+        }));
+        const form = card.querySelector("[data-aff-form] form");
+        form?.addEventListener("submit", (ev) => {
+            ev.preventDefault();
+            form.querySelector("button[type=submit]").disabled = true;
+            affSwap(fetch(form.action, { method: "POST", body: new FormData(form), headers: { "X-Requested-With": "fetch" } }).then((r) => r.text()));
+        });
+    }
+    const AFF_URL = {{ url_for('site_affiliate_card') | tojson }};
+    function affSwap(p) {
+        const card = document.getElementById("aff-card");
+        if (card) card.classList.add("loading");
+        p.then((html) => {
+            const box = document.createElement("div");
+            box.innerHTML = html.trim();
+            const next = box.firstElementChild;
+            if (card && next) { card.replaceWith(next); affWire(next); }
+        }).catch(() => card && card.classList.remove("loading"));
+    }
+    affWire(document.getElementById("aff-card"));
+    // 💰 GCP 비용: loaded after the page; ⚙️ opens the limits form (saved without leaving the page)
+    function costWire(card) {
+        card.querySelectorAll("[data-cost-refresh]").forEach((btn) => btn.addEventListener("click", () => {
+            btn.disabled = true; btn.classList.add("spin");
+            costSwap(fetch(COST_URL + "?fresh=1"));
+        }));
+        card.querySelectorAll("[data-cost-edit]").forEach((btn) => btn.addEventListener("click", () => {
+            const f = card.querySelector("[data-cost-form]");
+            if (f) f.hidden = !f.hidden;
+        }));
+        card.querySelector("[data-cost-form] form")?.addEventListener("submit", (ev) => {
+            ev.preventDefault();
+            costSwap(fetch(ev.target.action, { method: "POST", body: new FormData(ev.target), headers: { "X-Requested-With": "fetch" } }));
+        });
+    }
+    function costSwap(p) {
+        p.then((r) => r.text()).then((html) => {
+            const card = document.getElementById("cost-card");
+            const box = document.createElement("div");
+            box.innerHTML = html.trim();
+            const next = box.firstElementChild;
+            if (card && next) { card.replaceWith(next); costWire(next); }
+        }).catch(() => {});
+    }
+    // Read only when there is nothing in memory yet or it is over 10 minutes old; otherwise the card is already on the page.
+    const COST_URL = "{{ url_for('site_costs_card') }}";
+    const costCard = document.getElementById("cost-card");
+    if (costCard) costWire(costCard);
+    if (costCard && costCard.dataset.costStale) costSwap(fetch(COST_URL));
+})();
+</script>
+{% include "_usage_track.html" %}
+</body>
+</html>

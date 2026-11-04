@@ -1,0 +1,64 @@
+{# 회의 결과 페이지: 날짜별 결과 · 큐에 담기. 탭 아님 — 현황에서 들어와서 「현황으로」로 돌아감. #}
+{% set p_days = proposal_days or [] %}
+{% set p_day = proposal_day or '' %}
+{% set p_day_meetings = day_meetings or [] %}
+{% set p_counts = day_counts or {} %}
+<section class="meet-pane">
+    <header class="meet-pane-head">
+        <div class="meet-pane-titles">
+            <a class="meet-back" href="{{ url_for('site_status') }}" data-track="ui:meet-back">← 현황으로</a>
+            <b>회의 결과</b>
+            <span>{% if p_day %}{{ p_day[5:] if p_day|length >= 10 else p_day }} · {{ p_day_meetings | length }}건{% else %}현황에서 회의를 열면 쌓여요{% endif %}</span>
+        </div>
+    </header>
+    {% if p_days %}
+    <nav class="day-nav" aria-label="회의 날짜">
+        {% if proposal_day_newer %}<a class="day-arrow" href="{{ url_for('site_meet', date=proposal_day_newer) }}" data-track="ui:meet-day">‹</a>
+        {% else %}<span class="day-arrow off">‹</span>{% endif %}
+        <div class="day-chips">
+            {% for d in p_days[:14] %}
+            <a class="day-chip{% if d == p_day %} on{% endif %}" href="{{ url_for('site_meet', date=d) }}" data-track="ui:meet-day">{{ d[5:] }}<em>{{ p_counts.get(d, 0) }}</em></a>
+            {% endfor %}
+        </div>
+        {% if proposal_day_older %}<a class="day-arrow" href="{{ url_for('site_meet', date=proposal_day_older) }}" data-track="ui:meet-day">›</a>
+        {% else %}<span class="day-arrow off">›</span>{% endif %}
+    </nav>
+    {% for p in p_day_meetings %}
+    <details class="meet-card"{% if loop.first or p.id == viewing_proposal %} open{% endif %}>
+        <summary>
+            <span class="mc-title">{{ ((p.mode_label or "전사 회의").split(" (")[0] ~ " 결과") if p.meeting else "제안" }}</span>
+            <span class="mc-meta">{{ p.at[11:16] if p.at | length > 16 else p.at }}{% if p.focus_label %} · {{ p.focus_label }}{% endif %}{% if p.ask %} · {{ p.ask }}{% endif %}</span>
+        </summary>
+        <div class="mc-body">
+            {% if p.headline %}<p class="mc-headline">{{ p.headline }}</p>{% endif %}
+            {% if p.meeting %}
+            <p class="hint">{% if p.office %}{{ cur_office.name }} ({% for sid in p.sites or [] %}{{ sico(sid) }}{% endfor %}) · {% endif %}참석 {{ (p.attendees or []) | length }}명{% if p.host %} · {{ p.host }}{% endif %}{% if p.leader_note %} — “{{ p.leader_note }}”{% endif %}</p>
+            <form method="post" action="{{ url_for('site_meeting_top') }}" class="mc-go" data-fetch>
+                <input type="hidden" name="pid" value="{{ p.id }}">
+                <button class="act big" type="submit">큐에 담기</button>
+            </form>
+            {{ ideas(p) }}
+            {% else %}
+            {% for key, label in [("quick_wins", "이번 주 바로 할 일"), ("business", "사업 제안"), ("features", "기능 추가"), ("content", "콘텐츠 전략")] %}
+            {% if p[key] %}
+            <h3>{{ label }}</h3>
+            <ul class="ideas">
+                {% for x in p[key] %}
+                <li><b>{{ x.title }}</b>{% if x.team or x.effort %} <span class="idea-meta">{% if x.team %}{{ x.team }}{% endif %}{% if x.team and x.effort %} · {% endif %}{% if x.effort %}노력 {{ x.effort }}{% endif %}</span>{% endif %}
+                    {% if x.why %}<p><em>왜</em> {{ x.why }}</p>{% endif %}
+                    {% if x.how %}<p><em>어떻게</em> {{ x.how }}</p>{% endif %}
+                    {% if x.impact %}<p><em>효과</em> {{ x.impact }}</p>{% endif %}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+        </div>
+    </details>
+    {% else %}
+    <p class="hint">이 날짜의 회의·제안이 없어요.</p>
+    {% endfor %}
+    {% else %}
+    <p class="hint">아직 회의 결과가 없어요. 현황에서 회의를 열면 여기에 쌓여요.</p>
+    {% endif %}
+</section>

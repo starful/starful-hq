@@ -1,0 +1,412 @@
+{# Shared office map. Needs: office. Optional: here (step id to highlight), focus_role / focus_label (client-side "editing with" seat). #}
+{% from "_chibi.html" import chibi %}
+<div class="office-map{% if office.floor %} has-floor{% endif %} floor-{{ office.floor_no or 1 }}" id="office-map" data-focus="{{ focus_role or '' }}" data-focus-label="{{ focus_label or '' }}">
+    {% if office.floor %}<img class="floor-img" src="{{ url_for('static', filename=office.floor) }}" alt="" aria-hidden="true">{% endif %}
+    {% if office.floor_front %}<img class="floor-front" src="{{ url_for('static', filename=office.floor_front) }}" alt="" aria-hidden="true">{% endif %}
+    <div class="map-wall" aria-hidden="true"><span class="window"></span><span class="window"></span><span class="window"></span><span class="window"></span></div>
+    <div class="lane lane-content" aria-hidden="true"><span>콘텐츠</span></div>
+    <div class="lane lane-git{% if here == 'ship' %} here{% endif %}" aria-hidden="true"><span>git · 반영</span></div>
+    {% for zone in office.zones %}
+    <div class="rug tone-{{ zone.tone }}{% if here == zone.step and here != 'ship' %} here{% endif %}" style="left:{{ zone.desk.x }}%;top:{{ zone.desk.y }}%" aria-hidden="true"></div>
+    {% endfor %}
+    <div class="lounge-area" aria-hidden="true">
+        <span class="lounge-tag">라운지</span>
+        <span class="sofa"></span>
+        <span class="plant"></span>
+    </div>
+    {% for plate in office.plates %}
+    <div class="desk team-plate tone-{{ plate.team }}{% if here == plate.step %} here{% endif %}{% if plate.busy %} busy{% endif %}" data-team="{{ plate.team }}" style="left:{{ plate.x }}%;top:{{ plate.y }}%" aria-hidden="true">
+        <span class="monitor"></span>
+        <span class="desk-top"></span>
+        <span class="desk-plate">
+            <b>{{ plate.label }} <small>{{ plate.size }}명</small></b>
+            <em data-line>{{ plate.line }}</em>
+        </span>
+    </div>
+    {% endfor %}
+    {% if office.floor_label %}<span class="floor-badge f{{ office.floor_no }}" aria-hidden="true">{{ office.floor_label }}</span>{% endif %}
+    {% for person in office.roster %}
+    <div class="walker tone-{{ person.tone }} at-lounge" data-role="{{ person.id }}" style="left:{{ person.lounge.x }}%;top:{{ person.lounge.y }}%">
+        <div class="bubble" hidden></div>
+        {{ chibi(person) }}
+        <span class="walker-name">{{ person.name }}</span>
+    </div>
+    {% endfor %}
+    {# 사장 Taekki: only while a boss account is logged in (and for a minute after its last poll) #}
+    <div class="walker boss-walker{% if boss.at_desk %} at-desk{% else %} at-lounge{% endif %}" data-role="taekki"{% if not boss.present or office.borrow %} hidden{% endif %} style="left:{{ boss.pos.x }}%;top:{{ boss.pos.y }}%">
+        <div class="bubble boss-say" hidden></div>
+        <span class="sprite" role="img" aria-label="{{ boss.name }}" style="background-image:url('{{ url_for('static', filename='office/taekki-sheet.svg') }}');--back:url('{{ url_for('static', filename='office/taekki-back.svg') }}')"></span>
+        <span class="walker-name boss-name">👑 {{ boss.name }}</span>
+    </div>
+</div>
+<script type="application/json" id="office-first">{{ office | tojson }}</script>
+<script type="application/json" id="boss-first">{{ boss | tojson }}</script>
+<script>
+(function () {
+    const map = document.getElementById("office-map");
+    if (!map) return;
+    const KEY = {{ ("okoffice.pos.b" if office.borrow else "okoffice.pos") | tojson }};   // B1: visitors' own positions
+    const CUR_SITE = {{ cur_site.id | tojson }};
+    const ICON_URL_MAP = {{ url_for('site_icon', sid='SID') | tojson }};
+    const focus = map.dataset.focus || "";
+    const focusLabel = map.dataset.focusLabel || "작업 중";
+    const walkers = {};
+    let saved = {};
+    try { saved = JSON.parse(sessionStorage.getItem(KEY) || "{}") || {}; } catch (_) { saved = {}; }
+
+    // ---------- path finding on the floor plan (walls + furniture from nav.json) ----------
+    const NAV_URL = {{ url_for('static', filename=(office.nav or 'office/nav.json')) | tojson }};
+    const CELL = 20;
+    let nav = null, grid = null, GW = 0, GH = 0;
+    const SPEED = 230;  // canvas px per second
+    function buildGrid(n) {
+        GW = Math.ceil(n.w / CELL); GH = Math.ceil(n.h / CELL);
+        grid = new Uint8Array(GW * GH);
+        const block = (r, pad) => {
+            const x1 = Math.max(0, Math.floor((r[0] - pad) / CELL)), y1 = Math.max(0, Math.floor((r[1] - pad) / CELL));
+            const x2 = Math.min(GW - 1, Math.floor((r[0] + r[2] + pad) / CELL)), y2 = Math.min(GH - 1, Math.floor((r[1] + r[3] + pad) / CELL));
+            for (let y = y1; y <= y2; y++) for (let x = x1; x <= x2; x++) grid[y * GW + x] = 1;
+        };
+        n.walls.forEach((r) => block(r, 14));
+        n.obstacles.forEach((r) => block(r, 4));
+    }
+    const free = (x, y) => x >= 0 && y >= 0 && x < GW && y < GH && !grid[y * GW + x];
+    function nearestFree(cx, cy) {
+        if (free(cx, cy)) return [cx, cy];
+        for (let r = 1; r < 12; r++)
+            for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++)
+                if ((Math.abs(dx) === r || Math.abs(dy) === r) && free(cx + dx, cy + dy)) return [cx + dx, cy + dy];
+        return [cx, cy];
+    }
+    function sight(a, b) {  // straight walk between two cells without touching a blocked cell
+        const n = Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) * 2);
+        for (let i = 1; i < n; i++) {
+            const x = Math.round(a[0] + (b[0] - a[0]) * i / n), y = Math.round(a[1] + (b[1] - a[1]) * i / n);
+            if (!free(x, y)) return false;
+        }
+        return true;
+    }
+    function findPath(from, to) {  // A* on the grid, then shortcut corners. px in, px out.
+        if (!grid) return [to];
+        const s = nearestFree(Math.floor(from[0] / CELL), Math.floor(from[1] / CELL));
+        const g = nearestFree(Math.floor(to[0] / CELL), Math.floor(to[1] / CELL));
+        const key = (x, y) => y * GW + x;
+        const open = [[0, s[0], s[1]]], came = new Map(), cost = new Map([[key(s[0], s[1]), 0]]);
+        const h = (x, y) => Math.hypot(x - g[0], y - g[1]);
+        let found = false, guard = 0;
+        while (open.length && guard++ < 20000) {
+            let bi = 0;
+            for (let i = 1; i < open.length; i++) if (open[i][0] < open[bi][0]) bi = i;
+            const [, x, y] = open.splice(bi, 1)[0];
+            if (x === g[0] && y === g[1]) { found = true; break; }
+            for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]) {
+                const nx = x + dx, ny = y + dy;
+                if (!free(nx, ny) || (dx && dy && (!free(x + dx, y) || !free(x, y + dy)))) continue;
+                const nc = cost.get(key(x, y)) + (dx && dy ? 1.414 : 1);
+                if (nc < (cost.get(key(nx, ny)) ?? Infinity)) {
+                    cost.set(key(nx, ny), nc); came.set(key(nx, ny), [x, y]);
+                    open.push([nc + h(nx, ny), nx, ny]);
+                }
+            }
+        }
+        if (!found) return [to];
+        const cells = [g];
+        let c = g;
+        while (came.has(key(c[0], c[1]))) { c = came.get(key(c[0], c[1])); cells.push(c); }
+        cells.reverse();
+        const keep = [cells[0]];
+        for (let i = 1; i < cells.length - 1; i++) if (!sight(keep[keep.length - 1], cells[i + 1])) keep.push(cells[i]);
+        keep.push(cells[cells.length - 1]);
+        const pts = keep.slice(1).map((q) => [q[0] * CELL + CELL / 2, q[1] * CELL + CELL / 2]);
+        pts.push(to);
+        return pts;
+    }
+
+    // ---------- walking (rAF along the path) ----------
+    const W = () => (nav ? nav.w : 2400), H = () => (nav ? nav.h : 2000);
+    function posOf(el) {
+        return el._pos || [parseFloat(el.style.left) / 100 * W(), parseFloat(el.style.top) / 100 * H()];
+    }
+    // Depth: desks and tables are drawn over people (floor-front). Someone is behind one only while their feet
+    // are inside its footprint (sitting at it from the far side); anywhere else they're in front of it.
+    function depth(el, p) {
+        if (!nav || !nav.front) return;
+        const [x, y] = p || posOf(el);
+        const behind = nav.front.some((r) => x > r[0] - 20 && x < r[0] + r[2] + 20 && y > r[1] - 6 && y < r[1] + r[3] + 4);
+        el.classList.toggle("depth-behind", behind);
+        el.classList.toggle("depth-front", !behind);
+    }
+    function place(el, p) {
+        el._pos = p;
+        el.style.left = (p[0] / W() * 100) + "%";
+        el.style.top = (p[1] / H() * 100) + "%";
+        depth(el, p);
+    }
+    let last = 0;
+    function step(ts) {
+        const dt = last ? Math.min(0.1, (ts - last) / 1000) : 0;
+        last = ts;
+        for (const role in walkers) {
+            const el = walkers[role];
+            if (!el._path || !el._path.length) continue;
+            let p = posOf(el), budget = SPEED * dt;
+            while (budget > 0 && el._path.length) {
+                const t = el._path[0], dx = t[0] - p[0], dy = t[1] - p[1], d = Math.hypot(dx, dy);
+                if (Math.abs(dx) > 2) el.classList.toggle("face-left", dx < 0);
+                if (d > 1) el.classList.toggle("back", dy < -Math.abs(dx) * 0.7);   // walking away: back view
+                if (d <= budget) { p = t; budget -= d; el._path.shift(); }
+                else { p = [p[0] + dx / d * budget, p[1] + dy / d * budget]; budget = 0; }
+            }
+            place(el, p);
+            if (!el._path.length) {
+                el.classList.remove("walking");
+                el.classList.toggle("at-desk", !!el._toDesk);
+                faceSpot(el);
+                if (el._arrive) { const f = el._arrive; el._arrive = null; f(); }
+                save();
+            }
+        }
+        requestAnimationFrame(step);
+    }
+    function walkTo(el, pos, atDesk, onArrive) {
+        const to = [Number(pos.x) / 100 * W(), Number(pos.y) / 100 * H()];
+        const from = posOf(el);
+        el._toDesk = atDesk;
+        el._arrive = onArrive || null;
+        el.dataset.face = pos.face || "";
+        if (Math.hypot(to[0] - from[0], to[1] - from[1]) < 3) {
+            el._path = [];
+            el.classList.toggle("at-desk", atDesk);
+            el.classList.toggle("at-lounge", !atDesk);
+            faceSpot(el);
+            if (onArrive) onArrive();
+            return;
+        }
+        el.classList.remove("at-desk");
+        el.classList.add("at-lounge", "walking");
+        el._path = findPath(from, to);
+    }
+
+    // Start where people were on the previous page, so moving between steps continues the walk.
+    map.querySelectorAll(".walker").forEach((el) => {
+        const role = el.dataset.role;
+        walkers[role] = el;
+        el.classList.add("js-walk");
+        const s = saved[role];
+        if (s && isFinite(s.x) && isFinite(s.y)) {
+            el.style.left = s.x + "%";
+            el.style.top = s.y + "%";
+            el.classList.toggle("at-desk", !!s.desk);
+            el.classList.toggle("at-lounge", !s.desk);
+        }
+    });
+
+    function save() {
+        // keep the other floor's people too (each floor's page only knows its own): switching floors resumes both
+        let out = {};
+        try { out = JSON.parse(sessionStorage.getItem(KEY) || "{}") || {}; } catch (_) { out = {}; }
+        for (const role in walkers) {
+            const el = walkers[role];
+            out[role] = { x: parseFloat(el.style.left), y: parseFloat(el.style.top), desk: el.classList.contains("at-desk") };
+        }
+        try { sessionStorage.setItem(KEY, JSON.stringify(out)); } catch (_) {}
+    }
+    addEventListener("pagehide", save);   // mid-walk when leaving: continue from there on the next page
+    // After arriving, turn toward the spot's partner (chat, smoke) if it says so.
+    function faceSpot(el) {
+        const f = el.dataset.face || "";
+        el.classList.toggle("back", f === "up");   // seats on the far side of a desk/table: back to us
+        if (f === "left" || f === "right") el.classList.toggle("face-left", f === "left");
+    }
+    // Go somewhere the server says (desk, meeting chair, break spot). Same goal again: keep going.
+    function moveTo(el, pos, atDesk) {
+        const goal = `${pos.x},${pos.y},${atDesk ? 1 : 0}`;
+        if (el._goal === goal) return;
+        el._goal = goal;
+        stopWander(el);
+        walkTo(el, pos, atDesk);
+    }
+
+    // ---------- free time: idle people stroll around and come back ----------
+    const STROLL_ZONES = { plan: ["office", "game", "break", "pantry"], mkt: ["office", "game", "break", "pantry"],
+                           design: ["office", "game", "break", "pantry"], dev: ["office", "game", "break", "pantry"] };
+    function randomSpot(team) {
+        const keys = STROLL_ZONES[team] || ["corridor", "break"];
+        for (let tries = 0; tries < 40; tries++) {
+            const z = nav.zones[keys[Math.floor(Math.random() * keys.length)]];
+            const x = z[0] + 40 + Math.random() * (z[2] - z[0] - 80), y = z[1] + 110 + Math.random() * (z[3] - z[1] - 140);
+            if (free(Math.floor(x / CELL), Math.floor(y / CELL))) return { x: x / W() * 100, y: y / H() * 100 };
+        }
+        return null;
+    }
+    function stopWander(el) { clearTimeout(el._wanderT); el._wanderT = null; el._strolling = false; el.classList.remove("strolling"); }
+    function planWander(el, home, team) {
+        clearTimeout(el._wanderT);
+        el._wanderT = setTimeout(() => {
+            if (!nav || el._goalKind !== "rest") return;
+            const spot = randomSpot(team);
+            if (!spot) return planWander(el, home, team);
+            el._strolling = true;
+            el.classList.add("strolling");   // standing somewhere in the room: always in front of desks
+            const b = el.querySelector(".bubble");
+            if (b && b.classList.contains("rest")) b.textContent = "🚶 산책 중";
+            walkTo(el, spot, false, () => {
+                el._wanderT = setTimeout(() => {  // look around a bit, then back to what they were doing
+                    if (el._goalKind !== "rest") return;
+                    if (b && b.classList.contains("rest")) b.textContent = el._restLabel || "";
+                    walkTo(el, home, !!el._restSit, () => { el._strolling = false; el.classList.remove("strolling"); planWander(el, home, team); });
+                }, 3000 + Math.random() * 5000);
+            });
+        }, 10000 + Math.random() * 25000);
+    }
+
+    const navReady = fetch(NAV_URL).then((r) => r.json()).then((n) => {
+        nav = n; buildGrid(n);   // map is view-only: no room/order clicks
+        map.querySelectorAll(".walker").forEach((el) => depth(el));
+    }).catch(() => {});
+
+    requestAnimationFrame(step);
+    function paint(data) {
+        const office = data.office || data;
+        const lounge = office.lounge || {};
+        if (office.borrow) {   // B1: someone came down or went back up → draw the new set of people
+            const ids = (office.zones || []).map((z) => z.id).sort().join(",");
+            const have = Object.keys(walkers).filter((r) => r !== "taekki").sort().join(",");
+            if (ids !== have) { save(); location.reload(); return; }
+        }
+        (office.zones || []).forEach((zone) => {
+            let p = zone.person;
+            if (!p && zone.id === focus) p = { state: "work", state_label: focusLabel, line: "" };
+            const el = walkers[zone.id];
+            const desk = map.querySelector(`.desk[data-zone="${zone.id}"]`);
+            if (desk) {
+                desk.classList.toggle("busy", !!p);
+                const line = desk.querySelector("[data-line]");
+                if (line) line.textContent = (p && p.line) ? p.line : zone.hint;
+            }
+            if (!el) return;
+            const bubble = el.querySelector(".bubble");
+            el.hidden = !!zone.away;   // working downstairs (B1) right now: not on this floor
+            if (zone.away) { bubble.hidden = true; return; }
+            el.dataset.state = p ? p.state : "";
+            if (p) {
+                // Status only — work is started from 회의 결과 / 팀 상세 / 자동 진행, not the map.
+                bubble.hidden = false;
+                bubble.dataset.task = "";
+                bubble.className = `bubble state-${p.state || "idle"}`;
+                bubble.textContent = p.line || p.state_label || "";
+                if (p.site && p.site !== CUR_SITE) {
+                    const ico = document.createElement("img");
+                    ico.className = "site-ico";
+                    ico.src = ICON_URL_MAP.replace("SID", p.site);
+                    ico.alt = ico.title = p.site_label || p.site;
+                    bubble.prepend(ico);
+                }
+                el._goalKind = "desk";
+                moveTo(el, zone.desk, true);
+            } else if (zone.rest) {
+                bubble.hidden = false;
+                bubble.dataset.task = "";
+                el._restLabel = zone.rest.label;
+                if (!el._strolling) {
+                    bubble.className = `bubble rest rest-${zone.rest.act}`;
+                    bubble.textContent = zone.rest.label;
+                }
+                el.dataset.rest = zone.rest.act;
+                const sit = zone.rest.act === "desk";  // free time at own desk: sit behind it
+                const goal = `${zone.rest.x},${zone.rest.y},${sit ? 1 : 0}`;
+                el._restSit = sit;
+                if (el._goal !== goal) {
+                    moveTo(el, zone.rest, sit);
+                    el._goalKind = "rest";
+                    if (zone.rest.act !== "lunch") planWander(el, zone.rest, zone.team);
+                }
+            } else {
+                bubble.hidden = true;
+                if (lounge[zone.id]) moveTo(el, lounge[zone.id], false);
+            }
+        });
+        // Team plates: busy when any member works; line from the server.
+        (office.plates || []).forEach((pl) => {
+            const el = map.querySelector(`.desk[data-team="${pl.team}"]`);
+            if (!el) return;
+            el.classList.toggle("busy", !!pl.busy);
+            const line = el.querySelector("[data-line]");
+            if (line) line.textContent = pl.line || "";
+        });
+        if (data.boss) paintBoss(data.boss);
+        save();
+        document.dispatchEvent(new CustomEvent("office:update", { detail: data }));
+    }
+
+    // ---------- 사장 Taekki: shown while logged in; the boss moves her by clicking the floor ----------
+    const bossEl = walkers.taekki;
+    const BOSS_DESK = {{ boss_desk | tojson }};
+    const BOSS_MOVE_URL = {{ url_for('boss_move') | tojson }};
+    let bossMe = false, bossForced = -1;
+    function bossWalking() { return bossMe && bossEl && !bossEl.hidden; }
+    function paintBoss(b) {
+        if (!bossEl || !b) return;
+        bossEl.hidden = !b.present;
+        bossMe = !!b.me;
+        map.classList.toggle("boss-mode", bossWalking());
+        if (!b.present) return;
+        const first = bossForced < 0;
+        const forced = !first && b.forced > bossForced;
+        bossForced = Math.max(bossForced, b.forced || 0);
+        if (first || forced || !bossMe) moveTo(bossEl, b.pos, !!b.at_desk);   // the boss's own page leads, others follow
+    }
+    map.addEventListener("click", (ev) => {
+        if (!bossWalking()) return;
+        if (ev.target.closest(".bubble, .team-plate, a, input, button")) return;
+        const r = map.getBoundingClientRect();
+        let x = (ev.clientX - r.left) / r.width * 100, y = (ev.clientY - r.top) / r.height * 100;
+        const desk = Math.abs(x - BOSS_DESK.x) < 3 && Math.abs(y - BOSS_DESK.y) < 4;
+        if (desk) { x = BOSS_DESK.x; y = BOSS_DESK.y; }
+        else if (grid) {  // clicked on furniture: stand next to it
+            const c = nearestFree(Math.floor(x / 100 * W() / CELL), Math.floor(y / 100 * H() / CELL));
+            x = (c[0] * CELL + CELL / 2) / W() * 100; y = (c[1] * CELL + CELL / 2) / H() * 100;
+        }
+        bossEl._goal = "";
+        moveTo(bossEl, { x, y }, desk);
+        fetch(BOSS_MOVE_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ x, y }) }).catch(() => {});
+    });
+    let bossFirst = null;
+    try { bossFirst = JSON.parse(document.getElementById("boss-first").textContent); } catch (_) {}
+    if (bossFirst && bossEl) {  // show at once, walk once the floor plan is known
+        bossEl.hidden = !bossFirst.present;
+        Promise.race([navReady, new Promise((r) => setTimeout(r, 1500))]).then(() => paintBoss(bossFirst));
+    }
+    let first = {};
+    try { first = JSON.parse(document.getElementById("office-first").textContent); } catch (_) {}
+    // first paint once the floor plan is known, so the first walk already goes around walls
+    Promise.race([navReady, new Promise((r) => setTimeout(r, 1500))]).then(() => paint({ office: first }));
+    let tickTimer = null;
+    async function tick() {
+        clearTimeout(tickTimer);
+        try {
+            const res = await fetch({{ url_for('office_state', s=cur_site.id) | tojson }});
+            paint(await res.json());
+        } catch (_) {}
+        tickTimer = setTimeout(tick, 2500);
+    }
+    function tickNow() { setTimeout(tick, 300); }
+    document.addEventListener("office:poke", tickNow);   // a button just handed out work: show it on the map now
+    tickTimer = setTimeout(tick, 2500);
+
+    // Keep the right column the same height as the office (6/5) on every tab; both shrink on resize.
+    function syncSideToOffice() {
+        const side = document.querySelector(".site-page .side") || document.querySelector("aside.side");
+        if (!side || !map.isConnected) return;
+        const h = Math.round(map.getBoundingClientRect().height);
+        if (h > 40) side.style.setProperty("--office-h", h + "px");
+    }
+    syncSideToOffice();
+    requestAnimationFrame(() => requestAnimationFrame(syncSideToOffice));
+    window.addEventListener("load", syncSideToOffice);
+    if (typeof ResizeObserver !== "undefined") {
+        new ResizeObserver(syncSideToOffice).observe(map);
+    }
+    window.addEventListener("resize", syncSideToOffice);
+})();
+</script>

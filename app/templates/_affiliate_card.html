@@ -1,0 +1,68 @@
+{# 💴 어필리 pane. Same density as cost: label · hero ¥ · table · one foot. #}
+{% set sy = aff_sync or {} %}
+{% set sy_busy = sy.running or sy.login_open or sy.installing %}
+{% set st = {} %}{% for r in sy.rows or [] %}{% set _ = st.update({r.id: r}) %}{% endfor %}
+{% set need_login = (sy.rows or []) | selectattr('needs_login') | map(attribute='label') | list %}
+<div class="money-pane aff-card-b" id="aff-card"{% if sy_busy %} data-aff-busy="1"{% endif %}>
+    <header class="mp-top">
+        <span class="mc-pane-label earn">💴 어필리 수익</span>
+        <span class="mp-tools"><button type="button" class="mc-gear" data-aff-edit title="가져오기 · 로그인 · 직접 입력">⚙️</button></span>
+    </header>
+    <div class="mp-hero">
+        <b class="mc-big earn">{{ affiliate.total or '¥0' }}</b>
+        <span class="mp-sub">{{ (affiliate.month[5:] | int) ~ '월' if affiliate.month else '' }}{% if affiliate.prev_total %} · 지난달 {{ affiliate.prev_total }}{% endif %}</span>
+    </div>
+
+    {% if affiliate.rows %}
+    <table class="mc-table">
+        <thead><tr><th>플랫폼</th><th>클릭</th><th>주문</th><th>보상</th></tr></thead>
+        <tbody>
+        {% for r in affiliate.rows %}{% set s = st.get(r.id) or {} %}
+        <tr class="{{ 'earn' if r.earning }}" title="지난달 클릭 {{ '{:,}'.format(r.prev_clicks) if r.prev_clicks is not none else '-' }} · 보상 {{ r.prev or '-' }}{% if r.note %} · {{ r.note }}{% endif %}">
+            <th><i class="dot {{ 'ok' if s.ok else ('login' if s.needs_login else ('bad' if s.error else '')) }}" title="{{ '자동으로 읽었어요' if s.ok else ('로그인 필요' if s.needs_login else (s.error or '아직 안 읽었어요')) }}"></i>{{ r.label }}</th>
+            <td class="{{ 'zero' if not r.clicks }}">{{ '{:,}'.format(r.clicks) }}</td><td class="{{ 'zero' if not r.orders }}">{{ r.orders }}</td><td class="{{ 'zero' if not r.commission_raw }}"><b>{{ r.commission if r.commission_raw else '—' }}</b></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}<p class="hint">아직 숫자가 없어요.</p>{% endif %}
+
+    <p class="mc-foot{{ ' alert' if not sy_busy and (need_login or sy.error) }}">
+        {% if sy.running %}⏳ 관리 화면에서 가져오는 중…
+        {% elif sy.login_open %}🔑 Mac에 열린 창에서 로그인한 뒤 창을 닫아 주세요
+        {% elif sy.installing %}⏳ 브라우저 준비 중…
+        {% elif not sy.ready %}<span class="warn">자동 가져오기 준비 전</span> · ⚙️에서 설치
+        {% elif need_login %}<span class="warn">🔑 {{ need_login | join('·') }} 로그인 필요</span>
+            <button type="button" class="mc-link" data-aff-do="{{ url_for('site_affiliate_do', what='login') }}">로그인 창 열기</button>
+        {% elif sy.error %}<span class="warn" title="{{ sy.error }}">⚠️ 지난번 가져오기 실패</span>
+        {% else %}{{ 'Chrome · ' if sy.chrome else '' }}{{ sy.every_h }}시간마다{% if sy.at %} · {{ sy.at[5:] }}{% endif %}{% endif %}
+        {% if aff_msg %}<b class="{{ 'bad' if aff_bad }}">{{ aff_msg }}</b>{% endif %}
+    </p>
+
+    {% set same = affiliate.month == affiliate.this_month %}
+    {% set cur = {} %}{% for r in affiliate.rows if same %}{% set _ = cur.update({r.id: r}) %}{% endfor %}
+    <div class="mc-panel" data-aff-form hidden>
+        <div class="mc-actions">
+            {% if sy.ready %}
+            <button type="button" class="act small" data-aff-do="{{ url_for('site_affiliate_do', what='fetch') }}"{% if sy_busy %} disabled{% endif %}>↻ 지금 가져오기</button>
+            <button type="button" class="act ghost small" data-aff-do="{{ url_for('site_affiliate_do', what='login') }}"{% if sy_busy %} disabled{% endif %}>🔑 로그인 창</button>
+            {% elif not sy.installing %}
+            <button type="button" class="act small" data-aff-do="{{ url_for('site_affiliate_do', what='install') }}">브라우저 설치하기</button>
+            {% endif %}
+        </div>
+        <p class="mc-note">클릭은 우리 사이트 기록(GA4 · /go/), 주문·보상은 각 관리 화면에서 읽어요.{% if sy.install_error %} 설치 실패: {{ sy.install_error }}{% endif %}{% if sy.clicks_error %} 클릭 집계 실패: {{ sy.clicks_error }}{% endif %}</p>
+        <form method="post" action="{{ url_for('site_affiliate_save') }}">
+            <p class="mc-note"><b>{{ affiliate.this_month }}</b> 직접 입력 (8090과 같은 파일에 저장)</p>
+            <table class="mc-table mc-in">
+                <thead><tr><th></th><th>클릭</th><th>주문</th><th>보상</th></tr></thead>
+                {% for pid, label, ccy in affiliate.platforms %}{% set r = cur.get(pid) %}
+                <tr><th>{{ label }}</th>
+                    <td><input type="number" min="0" name="{{ pid }}.clicks" value="{{ r.clicks if r else 0 }}"></td>
+                    <td><input type="number" min="0" name="{{ pid }}.orders" value="{{ r.orders if r else 0 }}"></td>
+                    <td><input type="number" min="0" step="{{ '0.01' if ccy == 'USD' else '1' }}" name="{{ pid }}.commission" value="{{ ('%.2f' % r.commission_raw if ccy == 'USD' else '%d' % r.commission_raw) if r else 0 }}"></td></tr>
+                {% endfor %}
+            </table>
+            <div class="mc-actions end"><button class="act small" type="submit">저장</button><button class="act ghost small" type="button" data-aff-edit>닫기</button></div>
+        </form>
+    </div>
+</div>

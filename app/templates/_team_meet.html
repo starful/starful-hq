@@ -1,0 +1,18 @@
+{# 팀 탭 팀회의 버튼. Needs: team (plan|mkt|design|dev), meet_on, free_team, office. #}
+{% set meta = {
+    "plan": ("📋", "기획회의"),
+    "mkt": ("🔎", "마케회의"),
+    "design": ("🎨", "디자인회의"),
+    "dev": ("🛠️", "개발회의"),
+} %}
+{% set icon, label = meta[team] %}
+{% set free = (free_team or {}).get(team) or [] %}
+{% set on = (meet_on or {}).get(team) %}
+{% set blocked = on or (free | length) < 2 %}
+<form method="post" action="{{ url_for('site_meeting') }}" class="team-meet">
+    <button class="meet-btn m-{{ team }}" type="submit" name="mode" value="{{ team }}" data-track="ui:meet:{{ team }}"
+            title="{{ team_info[team].name }} 책상"{% if blocked %} disabled{% endif %}>
+        <span class="mi">{{ icon }}</span><b>{{ label }}</b>
+        <small>{% if on %}회의 중…{% elif (free | length) < 2 %}모일 사람 없음{% else %}{{ free | length }}명{% endif %}</small>
+    </button>
+</form>

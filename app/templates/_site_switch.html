@@ -1,0 +1,119 @@
+{# Header: floor buttons; click opens that floor's sites in a panel below (not beside).
+   Needs: cur_site, cur_office, offices, all_sites. office.sites_busy → .is-busy + green dot. #}
+{% from "_site_ico.html" import sico with context %}
+{% set busy_list = (office.sites_busy if office is defined and office.sites_busy is defined else []) or [] %}
+<nav class="site-switch floor-switch" aria-label="층 · 서비스" id="site-switch">
+    <div class="fs-floors" role="tablist" aria-label="층">
+        {% for oid, off in offices.items() | sort(attribute='1.floor') %}
+        {% set floor_busy = busy_list | selectattr('office', 'equalto', oid) | list %}
+        <details class="floor-menu o-{{ oid }}{% if oid == cur_office.id %} here{% endif %}" data-floor="{{ oid }}">
+            <summary class="fs-floor o-{{ oid }}{% if oid == cur_office.id %} on here{% endif %}{% if floor_busy %} is-busy{% endif %}"
+                     title="{{ off.blurb }}{% if floor_busy %} · 작업 {{ floor_busy | length }}곳{% endif %}" data-floor="{{ oid }}">
+                <i class="ss-floor">{{ off.floor_label }}</i><b>{{ off.name }}</b>{% if floor_busy %}<em class="fs-dot" aria-hidden="true"></em>{% endif %}
+            </summary>
+            <div class="fm-panel fs-sites o-{{ oid }}" data-floor="{{ oid }}" role="tabpanel">
+                {% for sid in off.sites %}{% set s = all_sites[sid] %}
+                {% set matches = busy_list | selectattr('id', 'equalto', sid) | list %}
+                {% set b = matches[0] if matches else none %}
+                <a class="ss-site{% if sid == cur_site.id %} here{% endif %}{% if not s.enabled %} soon{% endif %}{% if b %} is-busy{% endif %}"
+                   href="{{ url_for('site_status', site=sid) }}" data-site="{{ sid }}"
+                   title="{{ s.blurb }}{% if b %} · 작업중{% endif %}"{% if not s.enabled %} aria-disabled="true"{% endif %}>{{ sico(sid) }}<span>{{ s.label }}</span>{% if b %}<em class="ss-work" aria-label="작업중"></em>{% endif %}</a>
+                {% endfor %}
+                {% set floor_on = (office_autoship or {}).get(oid, True) %}
+                <form method="post" action="{{ url_for('office_autoship', office_id=oid) }}" class="ss-auto floor-auto" data-auto data-office="{{ oid }}" data-floor-label="{{ off.floor_label }}">
+                    <input type="hidden" name="on" value="{{ '0' if floor_on else '1' }}">
+                    <button type="submit" class="f3-toggle{% if floor_on %} on{% endif %}" title="{{ off.floor_label }} 사이트 전부 · PR·리뷰·머지·배포"><span></span>{{ off.floor_label }} 자동 진행 {{ '켬' if floor_on else '끔' }}</button>
+                </form>
+            </div>
+        </details>
+        {% endfor %}
+    </div>
+</nav>
+<script>
+(function () {
+    const nav = document.getElementById("site-switch");
+    if (!nav) return;
+    const menus = nav.querySelectorAll("details.floor-menu");
+    // Only one floor panel open; opening another closes the rest.
+    menus.forEach((d) => d.addEventListener("toggle", () => {
+        if (!d.open) return;
+        menus.forEach((o) => { if (o !== d) o.open = false; });
+        menus.forEach((o) => {
+            const sum = o.querySelector("summary");
+            if (sum) sum.classList.toggle("on", o.open);
+        });
+    }));
+
+    const ICON = {{ url_for('site_icon', sid='SID') | tojson }};
+    function paintBusy(busy) {
+        const map = {};
+        (busy || []).forEach((b) => { map[b.id] = b; });
+        nav.querySelectorAll(".ss-site[data-site]").forEach((a) => {
+            const b = map[a.dataset.site];
+            a.classList.toggle("is-busy", !!b);
+            let badge = a.querySelector(".ss-work");
+            if (b) {
+                if (!badge) { badge = document.createElement("em"); badge.className = "ss-work"; a.appendChild(badge); }
+                badge.setAttribute("aria-label", "작업중");
+                const base = (a.getAttribute("data-blurb") || "").trim() || (a.title || "").split(" · ")[0];
+                a.title = base ? `${base} · 작업중` : "작업중";
+            } else if (badge) {
+                badge.remove();
+                a.title = a.getAttribute("data-blurb") || "";
+            }
+        });
+        menus.forEach((menu) => {
+            const oid = menu.dataset.floor;
+            const n = (busy || []).filter((b) => b.office === oid).length;
+            const sum = menu.querySelector("summary");
+            if (!sum) return;
+            sum.classList.toggle("is-busy", n > 0);
+            let dot = sum.querySelector(".fs-dot");
+            if (n > 0 && !dot) { dot = document.createElement("em"); dot.className = "fs-dot"; dot.setAttribute("aria-hidden", "true"); sum.appendChild(dot); }
+            if (n === 0 && dot) dot.remove();
+            const base = (sum.getAttribute("data-blurb") || "").trim() || (sum.title || "").split(" · 작업")[0];
+            sum.title = n ? `${base} · 작업 ${n}곳` : base;
+        });
+    }
+    nav.querySelectorAll(".ss-site[data-site]").forEach((a) => a.setAttribute("data-blurb", (a.title || "").split(" · ")[0]));
+    nav.querySelectorAll("summary.fs-floor").forEach((btn) => btn.setAttribute("data-blurb", (btn.title || "").split(" · 작업")[0]));
+    document.addEventListener("office:update", (ev) => {
+        const office = (ev.detail || {}).office || {};
+        paintBusy(office.sites_busy || []);
+    });
+
+    // Floor autoship toggles (home + site header). Site pages also sync via site.html handler.
+    nav.querySelectorAll("form.floor-auto[data-auto]").forEach((f) => {
+        f.addEventListener("submit", async (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const on = f.querySelector('[name="on"]').value === "1";
+            let out = null;
+            try {
+                out = await fetch(f.action, { method: "POST", body: new FormData(f), headers: { "X-Requested-With": "fetch" } }).then((r) => r.json());
+            } catch (_) {}
+            if (!out || !out.ok) {
+                if (window.hqSay) window.hqSay("바꾸지 못했어요", false);
+                return;
+            }
+            if (window.hqSay) window.hqSay(out.msg, true);
+            const fl = out.floor_label || f.getAttribute("data-floor-label") || "";
+            const oid = out.office || f.dataset.office || "";
+            document.querySelectorAll("form[data-auto]").forEach((other) => {
+                const oOid = other.dataset.office || "";
+                const oFl = other.getAttribute("data-floor-label") || "";
+                if (oid && oOid && oOid !== oid) return;
+                if (!oOid && fl && oFl && oFl !== fl) return;
+                if (!oOid && !oFl && other !== f) return;
+                const ob = other.querySelector("button");
+                const oh = other.querySelector('[name="on"]');
+                if (!ob || !oh) return;
+                ob.classList.toggle("on", on);
+                const labelFl = other.getAttribute("data-floor-label") || fl;
+                ob.lastChild.textContent = (labelFl ? labelFl + " " : "") + "자동 진행 " + (on ? "켬" : "끔");
+                oh.value = on ? "0" : "1";
+            });
+        });
+    });
+})();
+</script>

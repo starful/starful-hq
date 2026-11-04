@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='hq-icon.svg') }}">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>YouTube · {{ site_label }} · Starful HQ</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+    <style>
+      .yt-page { max-width: 1100px; margin: 0 auto; padding: 16px 20px 40px; }
+      .yt-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px; }
+      .yt-top h1 { margin: 0; font-size: 20px; }
+      .yt-hint { color: #6b7385; font-size: 13px; line-height: 1.5; margin: 0 0 16px; }
+      .yt-status {
+        display: none; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px;
+        background: #eef8f2; border: 1px solid #b9dcc6; color: #1f5a3f; font-size: 13px;
+      }
+      .yt-status.show { display: block; }
+      .yt-status.err { border-color: #f0c48f; color: #8a4b12; background: #fff4e5; }
+      .yt-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+      .yt-tabs {
+        display: inline-flex; gap: 4px; padding: 3px; border-radius: 10px;
+        background: #f4f5f8; border: 1px solid #e3e7ef;
+      }
+      .yt-tab {
+        appearance: none; border: none; background: transparent; color: #6b7385;
+        font: inherit; font-size: 12px; font-weight: 700; padding: 7px 12px;
+        border-radius: 8px; cursor: pointer;
+      }
+      .yt-tab:hover { color: #2b3445; }
+      .yt-tab.active { background: #fff; color: #5b3a8c; border: 1px solid #d4c4ea; }
+      .yt-layout { display: grid; grid-template-columns: minmax(240px, 320px) 1fr; gap: 16px; }
+      @media (max-width: 860px) { .yt-layout { grid-template-columns: 1fr; } }
+      .yt-shops {
+        background: #fff; border: 1px solid #e3e7ef; border-radius: 14px;
+        max-height: 70vh; overflow: auto; padding: 8px;
+      }
+      .yt-shop {
+        display: block; width: 100%; text-align: left; background: transparent;
+        border: 1px solid transparent; border-radius: 10px; padding: 10px 12px;
+        color: #2b3445; cursor: pointer; margin: 0 0 4px; font: inherit;
+      }
+      .yt-shop:hover { border-color: #d4c4ea; background: #faf7ff; }
+      .yt-shop.active { border-color: #5b3a8c; background: #f3ecfb; }
+      .yt-shop .name { font-weight: 700; font-size: 13px; }
+      .yt-shop .addr { font-size: 11px; color: #888; margin-top: 2px; }
+      .yt-shop .gsc { font-size: 11px; margin-top: 4px; color: #777; font-weight: 600; }
+      .yt-shop .gsc.has-clicks { color: #5b3a8c; }
+      .yt-shop .badge {
+        display: inline-block; margin-top: 4px; font-size: 10px; font-weight: 700;
+        padding: 2px 7px; border-radius: 999px; background: #eef8f2; color: #1f5a3f; border: 1px solid #b9dcc6;
+      }
+      .yt-panel {
+        background: #fff; border: 1px solid #e3e7ef; border-radius: 14px; padding: 14px 16px;
+        min-height: 280px;
+      }
+      .yt-panel h2 { margin: 0 0 6px; font-size: 1.1rem; }
+      .yt-panel .meta { font-size: 12px; color: #888; margin-bottom: 12px; }
+      .yt-query-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+      .yt-query-row input {
+        flex: 1; min-width: 180px; background: #fff; color: #2b3445; border: 1px solid #d7deeb;
+        border-radius: 8px; padding: 9px 11px; font: inherit;
+      }
+      .yt-cands { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+      .yt-card {
+        border: 1px solid #e3e7ef; border-radius: 12px; overflow: hidden; background: #fafbfe;
+        display: flex; flex-direction: column;
+      }
+      .yt-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: #eee; }
+      .yt-card .body { padding: 10px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+      .yt-card .title { font-size: 13px; font-weight: 700; line-height: 1.35; }
+      .yt-card .ch { font-size: 11px; color: #888; }
+      .yt-card .views { font-size: 12px; font-weight: 700; color: #5b3a8c; }
+      .yt-card .btns { display: flex; gap: 6px; margin-top: auto; }
+      .yt-card .btns .btn { flex: 1; font-size: 12px; padding: 8px; cursor: pointer; border-radius: 8px; font-weight: 700; text-align: center; text-decoration: none; }
+      .btn-attach { background: #5b3a8c; color: #fff; border: none; }
+      .btn-open { background: #f4f5f8; color: #243f73; border: 1px solid #d7deeb; }
+      .yt-empty { color: #888; font-size: 13px; padding: 24px 8px; }
+      .yt-toolbar .btn, .yt-query-row .btn {
+        appearance: none; border: 1px solid #d7deeb; background: #fff; color: #2b3445;
+        border-radius: 8px; padding: 8px 12px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+      }
+      .yt-toolbar .btn:hover, .yt-query-row .btn:hover { border-color: #5b3a8c; color: #5b3a8c; }
+    </style>
+</head>
+<body class="site-page o-{{ cur_office.id }} floor-{{ cur_office.floor }}">
+<header class="bar">
+    <a class="mark" href="{{ url_for('home') }}"><span class="mark-star">★</span> Starful HQ</a>
+    {% include "_site_switch.html" %}
+    <a class="act ghost small" href="{{ url_for('site_images') }}">← 디자인팀</a>
+</header>
+<main class="yt-page">
+<div class="yt-wrap" data-yt-site="{{ site_id }}" data-yt-noun="{{ noun }}" data-yt-api="{{ url_for('site_youtube_api', path='') }}">
+  <div class="yt-top">
+    <h1>YouTube · {{ site_label }}</h1>
+    <span class="chip" style="background:#f3ecfb;color:#5b3a8c;border:1px solid #d4c4ea">디자인팀</span>
+  </div>
+  <p class="yt-hint">
+    {{ noun }}를 고르고 후보를 검색한 뒤, 영상을 선택해 <code>youtube_id</code>를 EN/KO 마크다운에 붙입니다.
+    목록은 최근 28일 Search Console 클릭·노출(EN+KO 합)이며, 클릭 많은 {{ noun }}가 위에 옵니다.
+  </p>
+  <div id="yt-status" class="yt-status" role="status"></div>
+  <div class="yt-toolbar">
+    <div class="yt-tabs" role="tablist" aria-label="{{ noun }} 필터">
+      <button type="button" class="yt-tab active" role="tab" data-filter="missing" aria-selected="true">없는 {{ noun }}</button>
+      <button type="button" class="yt-tab" role="tab" data-filter="attached" aria-selected="false">붙임 완료</button>
+      <button type="button" class="yt-tab" role="tab" data-filter="all" aria-selected="false">전체</button>
+    </div>
+    <button type="button" class="btn" id="yt-reload">목록 새로고침</button>
+    <span id="yt-key" style="font-size:12px;color:#888"></span>
+    <span id="yt-gsc" style="font-size:12px;color:#888"></span>
+  </div>
+  <div class="yt-layout">
+    <div class="yt-shops" id="yt-shops"><div class="yt-empty">로딩…</div></div>
+    <div class="yt-panel" id="yt-panel"><div class="yt-empty">왼쪽에서 {{ noun }}를 선택하세요.</div></div>
+  </div>
+</div>
+</main>
+<script src="{{ url_for('static', filename='youtube.js') }}?v=1"></script>
+{% include "_usage_track.html" %}
+</body>
+</html>

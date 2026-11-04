@@ -1,0 +1,27 @@
+{# HQ click counts — header popup. Needs: usage (usage.summary()). #}
+<header class="gp-head sp-head"><b>👆 HQ 클릭</b><span class="gp-total">{{ '{:,}'.format(usage.total) }}</span></header>
+<p class="sp-sum">최근 {{ usage.days }}일{% if usage.updated %} · {{ usage.updated[5:16] }}{% endif %}</p>
+{% if usage.top %}
+<div class="usage-cols">
+    <div>
+        <h3>자주</h3>
+        <ol class="usage-list">
+            {% for row in usage.top[:8] %}
+            <li><b>{{ row.label }}</b><em>{{ row.n }}</em></li>
+            {% endfor %}
+        </ol>
+    </div>
+    {% if usage.low %}
+    <div>
+        <h3>드묾 <small>정리 후보</small></h3>
+        <ol class="usage-list quiet">
+            {% for row in usage.low[:6] %}
+            <li><b>{{ row.label }}</b><em>{{ row.n }}</em></li>
+            {% endfor %}
+        </ol>
+    </div>
+    {% endif %}
+</div>
+{% else %}
+<p class="hint">아직 집계가 없어요. 회의·할 일·탭을 쓰면 여기에 쌓여요.</p>
+{% endif %}

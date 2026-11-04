@@ -1,0 +1,5 @@
+{# Character art. p = a roster person (office.ROSTER).
+   face=True: head picture. Otherwise the 4-frame pixel sheet (idle, walk A, walk B, typing). #}
+{% macro chibi(p, face=False) -%}
+{% if face %}<img class="face-img" src="{{ url_for('static', filename=p.face) }}" alt="" loading="lazy">{% else %}<span class="sprite" role="img" aria-label="{{ p.name }}" style="background-image:url('{{ url_for('static', filename=p.sprite) }}'){% if p.sprite_back %};--back:url('{{ url_for('static', filename=p.sprite_back) }}'){% endif %}"></span>{% endif %}
+{%- endmacro %}

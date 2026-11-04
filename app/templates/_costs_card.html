@@ -1,0 +1,80 @@
+{# 💰 비용 pane. Same shape as affiliate: label · hero ¥ · table · caps strip (Claude·한도). #}
+{% set now = cost.now %}
+{% set lim = cost.limits %}
+{% set cl = cost.claude or {} %}
+{% set caps = cost.caps or [] %}
+{% set parts = [("gemini", "Gemini 글", "#5b7cc4"), ("banana", "Gemini 그림", "#9a6bd0"), ("imagen", "Imagen", "#c45b9a"), ("places", "Places", "#2e9e6a")] %}
+{% set month_paid = now.paid if now else 0 %}
+{% set month_pct = ((100 * month_paid / lim.monthly_yen) if lim.monthly_yen else 0) %}
+{% set month_level = 'over' if lim.monthly_yen and month_paid >= lim.monthly_yen else 'danger' if month_pct >= 90 else 'warn' if month_pct >= 70 else '' %}
+<div class="money-pane cost-card" id="cost-card"{% if cost_stale %} data-cost-stale="1"{% endif %}>
+    <header class="mp-top">
+        <span class="mc-pane-label spend">💰 비용</span>
+        <span class="mp-tools">
+            <button type="button" class="mc-gear mc-refresh" data-cost-refresh title="{{ (cost_at ~ '에 읽음 · ') if cost_at }}눌러서 지금 다시 읽기">↻</button>
+            <button type="button" class="mc-gear" data-cost-edit title="하루 상한 바꾸기">⚙️</button>
+        </span>
+    </header>
+    <div class="mp-hero">
+        {% if now %}
+        <b class="mc-big spend">¥{{ '{:,}'.format(now.total) }}</b>
+        <span class="mp-sub">GCP{% if now.month %} {{ now.month[5:] | int }}월{% endif %}{% for m in cost.months[:1] %} · 지난달 ¥{{ '{:,}'.format(m.total) if m.total is not none else '-' }}{% endfor %}</span>
+        {% else %}
+        <span class="mp-sub">읽는 중…</span>
+        {% endif %}
+    </div>
+
+    {% if now %}
+    <table class="mc-table">
+        <thead><tr><th>항목</th><th>금액</th></tr></thead>
+        <tbody>
+        {% for key, label, color in parts if now.cats[key] %}
+        <tr><th><i class="dot" style="--c: {{ color }}"></i>{{ label }}</th><td><b>¥{{ '{:,}'.format(now.cats[key]) }}</b></td></tr>
+        {% endfor %}
+        {% if now.other %}<tr><th><i class="dot" style="--c: #c3c9d6"></i>그 외</th><td><b>¥{{ '{:,}'.format(now.other) }}</b></td></tr>{% endif %}
+        </tbody>
+    </table>
+    {% elif cost.error %}
+    <p class="hint">GCP · {{ cost.error }}</p>
+    {% else %}
+    <p class="hint">읽는 중…</p>
+    {% endif %}
+
+    <div class="mp-meters">
+        {% if cl.windows %}
+        <p class="mp-h" title="Claude{% if cl.plan %} {{ cl.plan | capitalize }}{% endif %} · {% for w in cl.windows %}{{ w.label }} 리셋까지 {{ w.resets_in }}{{ ' · ' if not loop.last }}{% endfor %}">Claude 사용량</p>
+        {% for w in cl.windows %}
+        {% set wp = w.percent | round | int %}
+        <div class="mp-meter {{ 'over' if wp >= 100 else 'danger' if wp >= 90 else 'warn' if wp >= 70 else '' }}" title="{{ w.label }} · 리셋까지 {{ w.resets_in }}">
+            <span class="k">{{ w.label }}</span><i class="mp-bar" style="--w: {{ [wp, 100] | min }}%"></i><span class="v"><b>{{ wp }}%</b></span>
+        </div>
+        {% endfor %}
+        {% endif %}
+        <p class="mp-h">오늘 한도</p>
+        {% for row in caps %}
+        <div class="mp-meter {{ row.level }}" title="{{ row.label }} {{ row.used }}/{{ row.cap }}{{ row.unit }}">
+            <span class="k">{{ row.label }}</span><i class="mp-bar" style="--w: {{ row.pct }}%"></i><span class="v"><b>{{ row.used }}</b><small> / {{ '{:,}'.format(row.cap) }}</small></span>
+        </div>
+        {% endfor %}
+        {% if lim.monthly_yen %}
+        <div class="mp-meter {{ month_level }}" title="그림·사진 이번 달 유료 사용">
+            <span class="k">그림·사진 <small>(월)</small></span><i class="mp-bar" style="--w: {{ [month_pct | round | int, 100] | min }}%"></i><span class="v"><b>¥{{ '{:,}'.format(month_paid) }}</b><small> / ¥{{ '{:,}'.format(lim.monthly_yen) }}</small></span>
+        </div>
+        {% endif %}
+        {% if cost_msg %}<p class="mc-caps-msg warn">{{ cost_msg }}</p>{% endif %}
+    </div>
+
+    <div class="mc-panel" data-cost-form hidden>
+        <form method="post" action="{{ url_for('site_costs_limits') }}">
+            <p class="mc-note">하루 상한이에요. 넘으면 그날은 멈추고 다음 날 이어서 해요. YouTube는 무료 검색 쿼터(검색 1회≈100유닛)예요.</p>
+            <div class="mc-fields">
+                <label>AI 그림 하루 <input type="number" min="0" name="daily_images" value="{{ lim.daily_images }}"> 장</label>
+                <label>Places 하루 <input type="number" min="0" name="daily_places" value="{{ lim.daily_places }}"> 회</label>
+                <label>YouTube 하루 <input type="number" min="0" name="daily_youtube" value="{{ lim.daily_youtube }}"> 회</label>
+                <label>그림·사진 한 달 <input type="number" min="0" step="500" name="monthly_yen" value="{{ lim.monthly_yen }}"> 엔</label>
+            </div>
+            {% if cost.months %}<p class="mc-note">지난 달 GCP: {% for m in cost.months %}{{ m.month[5:] | int }}월 {{ '¥{:,}'.format(m.total) if m.total is not none else '-' }}{% if m.total %} (그림·사진 ¥{{ '{:,}'.format(m.paid) }}){% endif %}{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}
+            <div class="mc-actions end"><button class="act small" type="submit">저장</button><button class="act ghost small" type="button" data-cost-edit>닫기</button></div>
+        </form>
+    </div>
+</div>

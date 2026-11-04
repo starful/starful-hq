@@ -1,0 +1,46 @@
+{# Header button + popup with the latest reports. The popup sits on the right, the office stays visible. #}
+<button type="button" class="rep-btn" id="rep-btn">📑 리포트</button>
+<div class="report-pop" id="report-pop" hidden>
+    <header><b>📑 리포트 · 분석 · 회의</b><button type="button" class="x" id="rep-close" aria-label="닫기">×</button></header>
+    <div class="rep-body" id="rep-body"><p class="hint">불러오는 중…</p></div>
+</div>
+<script>
+(function () {
+    const btn = document.getElementById("rep-btn"), pop = document.getElementById("report-pop"), body = document.getElementById("rep-body");
+    if (!btn) return;
+    const URL = {{ url_for('site_reports') | tojson }};
+    async function open(date) {
+        pop.hidden = false;
+        try { body.innerHTML = await fetch(URL + (date ? "?date=" + encodeURIComponent(date) : "")).then((r) => r.text()); }
+        catch (_) { body.innerHTML = '<p class="hint">불러오지 못했어요.</p>'; }
+        const on = body.querySelector(".rep-day.on");
+        if (on) on.scrollIntoView({ block: "nearest", inline: "center" });
+    }
+    // date chips / ◀ ▶ inside the popup
+    body.addEventListener("click", (ev) => {
+        const b = ev.target.closest("[data-date]");
+        if (b && b.dataset.date && !b.disabled) open(b.dataset.date);
+    });
+    btn.addEventListener("click", () => (pop.hidden ? open("") : (pop.hidden = true)));
+    // A meeting just ended: show its result right away (also after the page reloads).
+    const FLAG = "okrep.open";
+    try { if (sessionStorage.getItem(FLAG)) { sessionStorage.removeItem(FLAG); open(""); } } catch (_) {}
+    const inMeeting = {};
+    document.addEventListener("office:update", (ev) => {
+        if (!(ev.detail || {}).jobs) return;
+        const all = ev.detail.jobs;
+        let ended = false;
+        for (const role in all) {
+            const j = all[role], now = !!(j.running && String(j.task || "").startsWith("meeting"));
+            if (inMeeting[role] && !now) ended = true;
+            inMeeting[role] = now;
+        }
+        if (ended) {
+            try { sessionStorage.setItem(FLAG, "1"); } catch (_) {}
+            open("");
+        }
+    });
+    document.getElementById("rep-close").addEventListener("click", () => { pop.hidden = true; });
+    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") pop.hidden = true; });
+})();
+</script>
