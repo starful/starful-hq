@@ -186,6 +186,7 @@ content 타입별 쓰기·리서치·slug·레이아웃. UI seed/topics는 kit�
 - 버전 관리: git `https://github.com/starful/starful-hq` (main). 작업 전 백업 대신 커밋. `data/` · `.bak/` · `__pycache__/` · `.env`는 추적 안 함 (`.gitignore`)
 - 자동 진행(PR·배포) 대상이 아님 — HQ는 Mac 로컬에서만 돎
 - 파일 이름은 무조건 영어: 영문자 · 숫자 · `-` `_` `.` 만 (한글·공백 금지). 폴더 이름도 같음. `tests/test_filenames.py`가 검사
+- README.md는 기본 영어로 쓴다 (SPEC.md·기획서는 한국어)
 - 서버 재시작 = 돌던 잡 끊김. 큰 수정은 잡이 없을 때
 - 자동 생성 파일(.pyc 등)은 변경으로 치지 않음
 - 화면은 자동 리로드하지 않음: 지도·「지금 하는 일」은 폴링, 서버 HTML은 「끝난 일이 있어요 · 화면 새로고침」배너만(짧은 잡 연속 완료에 토스트 없음)

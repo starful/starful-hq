@@ -1,27 +1,40 @@
 # Starful HQ
 
-사이트 관리용 로컬 백오피스. 가상 오피스에서 글·SEO·이미지·PR·배포를 한 흐름으로 처리합니다.
+Local back office for managing the Starful sites. A virtual office where AI staff handle writing, SEO, images, PRs and deploys in one flow.
 
-- 주소: http://127.0.0.1:8091
-- 실행: `./start.sh` (또는 `./start.sh 7777`)
-- 사이트 목록: `/opt/work/sites.yaml` 의 `hq:` 블록
+- URL: http://127.0.0.1:8091
+- Run: `./start.sh` (or `./start.sh 7777`)
+- Sites: the `hq:` blocks in `/opt/work/sites.yaml`
 
-## 폴더
+## Layout
 
 ```text
 starful-hq/
-  start.sh          ← 실행
-  app/              ← 코드
-    routes.py       ← 화면·API (Flask)
-    sites.py        ← sites.yaml
-    office/         ← 층·사원·회의
-    work/           ← 맡기기·실행 큐·에이전트·배포
-    content/        ← 글·이미지 (사이트 종류별)
-    money/          ← 어필리·GCP 비용·HQ 클릭
-    snapshot.py     ← 저장된 숫자
+  start.sh          ← run
+  app/              ← code
+    routes.py       ← pages and API (Flask)
+    sites.py        ← sites.yaml loader
+    office/         ← floors, staff, meetings
+    work/           ← tasks, run queue, agents, deploys
+    content/        ← posts and images (per site type)
+    money/          ← affiliate, GCP costs, HQ click usage
+    snapshot.py     ← cached numbers
     templates/ static/
-  data/             ← 런타임 (소스 아님)
+  docs/SPEC.md      ← development spec
+  data/             ← runtime state (not source)
   tests/
 ```
 
-코드와 데이터는 분리되어 있습니다. `data/` 는 깃에 올리지 않는 로컬 상태입니다.
+Code and data are kept apart. `data/` is local state and is not committed.
+
+## Documents
+
+- Business requirements: the Starful HQ plan (HTML) in Google Drive `AI/Starful HQ/`
+- Screen design: Claude Design canvas "Starful HQ 화면 설계"
+- Development spec: [`docs/SPEC.md`](docs/SPEC.md)
+
+## Repository rules
+
+- File and folder names are English only: letters, digits, `-`, `_`, `.` (no Korean, no spaces). Checked by `tests/test_filenames.py`.
+- README is written in English by default.
+- Commit instead of copying to `.bak/`. `data/`, `.bak/`, `__pycache__/` and `.env` are ignored.
