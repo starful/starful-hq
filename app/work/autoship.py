@@ -163,6 +163,18 @@ def _dirty() -> bool:
     return bool(files) and not snapshot.owner_wip(files)
 
 
+def _deploy_ready() -> tuple[bool, str]:
+    """Deploy only from main/master. Wrong branch → stuck (no retry spam)."""
+    from app.work import workers
+    workers._okadmin_import()
+    from git_ops import git_current_branch, is_production_branch
+    root = sites.current().repo
+    branch = (git_current_branch(root) or "").strip() or "?"
+    if is_production_branch(root, branch):
+        return True, ""
+    return False, f"지금 브랜치가 {branch}예요 · main으로 맞춘 뒤 올려요 (소이에게 머지)"
+
+
 def next_step() -> str | None:
     """Hand out the next step for the current site. Returns the person it went to (or None)."""
     from app.office import jobs
@@ -171,6 +183,13 @@ def next_step() -> str | None:
     site = sites.current()
     if not site.enabled or not enabled(site.id) or _site_busy(site.id):
         return None
+    flow = office.read_flow()
+    # Always reconcile: GitHub-merged PRs, stale flow.merged=false, leftover feat/ checkout
+    try:
+        workers.sync_merged_pr_from_github()
+        workers.ensure_on_main_if_idle()
+    except Exception as exc:  # noqa: BLE001
+        print(f"autoship sync_merged: {exc}")
     flow = office.read_flow()
     open_pr = bool(flow.get("pr")) and not flow.get("merged")
     if open_pr:
@@ -183,6 +202,9 @@ def next_step() -> str | None:
         who, _kind = workers.start_fix_for_review()
         return who
     if flow.get("merged") and not flow.get("deployed"):
+        ready, _why = _deploy_ready()
+        if not ready:
+            return None  # stage shows stuck; do not keep starting deploy jobs
         return jobs.start_task("deploy", "사이트 올리기 시작 (자동)", workers.deploy)
     if _dirty():
         return jobs.start_task("issue", "바뀐 내용 PR 만들기 시작 (자동)", workers.issue_pr, "")
@@ -208,6 +230,10 @@ def stage(snap_git: dict[str, Any] | None = None) -> dict[str, Any]:
     from app.work import workers
     site = sites.current()
     off = sites.office_of(site.id)
+    try:
+        workers.sync_merged_pr_from_github()
+    except Exception:  # noqa: BLE001 - UI must still render
+        pass
     flow = office.read_flow()
     pr = flow.get("pr") if isinstance(flow.get("pr"), dict) else None
     open_pr = bool(pr) and not flow.get("merged")
@@ -230,7 +256,11 @@ def stage(snap_git: dict[str, Any] | None = None) -> dict[str, Any]:
         step = "머지" if flow.get("verdict_ok") else ("고치는 중" if flow.get("reviewed") else "리뷰")
         out.update(key="pr", label=f"PR #{pr.get('number')} {step}", detail="개발팀이 검토해서 통과하면 머지·배포까지 해요", needs_person=False)
     elif flow.get("merged") and not flow.get("deployed"):
-        out.update(key="deploy", label="머지됨 · 사이트 올리는 차례", detail="개발팀이 Cloud Build로 올려요", needs_person=False)
+        ready, why = _deploy_ready()
+        if not ready:
+            out.update(key="stuck", label="배포 대기 · main이 아님", detail=why, needs_person=True)
+        else:
+            out.update(key="deploy", label="머지됨 · 사이트 올리는 차례", detail="개발팀이 Cloud Build로 올려요", needs_person=False)
     elif git.get("dirty"):
         detail = (f"{off.floor_label} 자동 진행이 꺼져 있어요 · 아래 버튼으로 PR을 만들거나 자동 진행을 켜 주세요" if not out["auto"]
                   else ("진행 중인 일이 끝나면 PR을 만들어요" if busy else "곧 PR을 만들어요"))

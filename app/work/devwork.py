@@ -426,8 +426,6 @@ def fix_review(work) -> str:
     branch = str(flow.get("branch") or "").strip()
     if not flow.get("pr") or flow.get("merged") or not review:
         raise RuntimeError("고칠 리뷰가 없어요")
-    if branch and _git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip() != branch:
-        raise RuntimeError(f"지금 브랜치가 PR 브랜치({branch})가 아니에요")
     prompt = (
         f"너는 {sites.current().about} 저장소의 개발자다. 열린 PR #{(flow.get('pr') or {}).get('number')}의 리뷰에서 "
         "꼭 고치라고 한 것만 고쳐라. 그 밖의 코드는 바꾸지 마라.\n"
@@ -437,6 +435,11 @@ def fix_review(work) -> str:
         "- 끝나면 마지막에 '바꾼 것:' 아래에 한 줄씩 적어라.\n"
     )
     with work.git_turn():
+        # Outside merges leave flow.merged=false; sync first or autoship retries this forever.
+        synced = workers.sync_merged_pr_from_github()
+        if synced:
+            return synced
+        workers.ensure_pr_branch(branch)
         before = _dirty()
         work.say("지금 테스트 상태를 먼저 확인하는 중")
         baseline_failures()

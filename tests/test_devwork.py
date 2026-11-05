@@ -128,6 +128,7 @@ def test_code_pr_review_is_fixed_by_the_dev_team(tmp_path, monkeypatch):
     monkeypatch.setattr(office, "FLOW_PATH", tmp_path / "flow.json")
     office.write_flow(pr={"number": 1}, branch="feat/1", reviewed=True, verdict_ok=False, required=["x.py: print 2"])
     seen = {}
+    switched = []
 
     class P:
         returncode, stderr = 0, ""
@@ -138,6 +139,8 @@ def test_code_pr_review_is_fixed_by_the_dev_team(tmp_path, monkeypatch):
         return P(), "바꾼 것:\n- x.py"
     monkeypatch.setattr(devwork, "_agent", fake_agent)
     monkeypatch.setattr(workers, "push_fixes", lambda work, fixed: f"pushed {fixed}")
+    monkeypatch.setattr(workers, "sync_merged_pr_from_github", lambda: None)
+    monkeypatch.setattr(workers, "ensure_pr_branch", lambda b: switched.append(b))
 
     class W:
         role = "hajun"
@@ -149,4 +152,78 @@ def test_code_pr_review_is_fixed_by_the_dev_team(tmp_path, monkeypatch):
             import contextlib
             return contextlib.nullcontext()
     out = devwork.fix_review(W())
+    assert switched == ["feat/1"]
     assert "x.py: print 2" in seen["prompt"] and out.endswith("pushed ['app/x.py']")
+
+
+def test_fix_review_stops_when_pr_already_merged_on_github(tmp_path, monkeypatch):
+    """Outside merge left flow.merged=false — sync instead of 'wrong branch' forever."""
+    from app import office
+
+    monkeypatch.setattr(devwork.tools, "need", lambda *a: None)
+    monkeypatch.setattr(office, "FLOW_PATH", tmp_path / "flow.json")
+    office.write_flow(pr={"number": 19}, branch="feat/18-x", reviewed=True, verdict_ok=False,
+                      required=["script/x.py: add pages"], merged=False)
+    monkeypatch.setattr(workers, "sync_merged_pr_from_github",
+                        lambda: "PR #19은 이미 머지됐어요 · 배포 차례로 넘길게요")
+    monkeypatch.setattr(workers, "ensure_pr_branch", lambda b: (_ for _ in ()).throw(AssertionError("no checkout")))
+
+    class W:
+        role = "ren"
+
+        def say(self, m):
+            pass
+
+        def git_turn(self):
+            import contextlib
+            return contextlib.nullcontext()
+
+    out = devwork.fix_review(W())
+    assert "이미 머지" in out
+
+
+def test_ensure_pr_branch_checks_out(tmp_path, monkeypatch):
+    import subprocess
+
+    repo = tmp_path / "site"
+    repo.mkdir()
+    for cmd in (["init", "-q", "-b", "main"],
+                ["commit", "--allow-empty", "-qm", "init"],
+                ["checkout", "-b", "feat/1"]):
+        subprocess.run(["git", "-c", "user.email=a@b", "-c", "user.name=a", *cmd], cwd=repo, check=True)
+    subprocess.run(["git", "checkout", "main"], cwd=repo, check=True)
+    monkeypatch.setattr(workers, "OKPY", repo)
+    workers.ensure_pr_branch("feat/1")
+    cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo,
+                         capture_output=True, text=True, check=True).stdout.strip()
+    assert cur == "feat/1"
+
+
+def test_ensure_on_main_when_no_open_pr(tmp_path, monkeypatch):
+    import subprocess
+
+    from app import office
+
+    repo = tmp_path / "site"
+    repo.mkdir()
+    for cmd in (["init", "-q", "-b", "main"],
+                ["commit", "--allow-empty", "-qm", "init"],
+                ["checkout", "-b", "feat/stale"]):
+        subprocess.run(["git", "-c", "user.email=a@b", "-c", "user.name=a", *cmd], cwd=repo, check=True)
+    monkeypatch.setattr(workers, "OKPY", repo)
+    monkeypatch.setattr(office, "FLOW_PATH", tmp_path / "flow.json")
+    office.write_flow(pr=None, merged=True, deployed=True, branch="feat/stale")
+    assert workers.ensure_on_main_if_idle() is True
+    cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo,
+                         capture_output=True, text=True, check=True).stdout.strip()
+    assert cur == "main"
+
+
+def test_sync_clears_stale_merged_false_without_pr(tmp_path, monkeypatch):
+    from app import office
+
+    monkeypatch.setattr(office, "FLOW_PATH", tmp_path / "flow.json")
+    monkeypatch.setattr(workers, "ensure_on_main_if_idle", lambda: False)
+    office.write_flow(pr=None, merged=False, deployed=True, last_pr={"number": 54}, branch="feat/x")
+    assert workers.sync_merged_pr_from_github() is None
+    assert office.read_flow().get("merged") is True

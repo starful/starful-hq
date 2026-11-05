@@ -9,7 +9,7 @@
 ## 1. 실행 환경
 
 - Mac 로컬 `/opt/work/starful-hq`, 포트 8091 (http://127.0.0.1:8091)
-- 기동: `./start.sh` → `python -m app` (Flask). stat 리로더라 `.py`를 고치면 서버가 재시작되고 돌던 잡은 끊김. 템플릿은 `TEMPLATES_AUTO_RELOAD`로 재시작 없이 반영
+- 기동: 로그인 시 LaunchAgent `com.starful.hq` (상시) · `./hq-ctl.sh on|off|status` · 수동 `./start.sh`. Flask stat 리로더라 `.py`를 고치면 서버가 재시작되고 돌던 잡은 끊김. 템플릿은 `TEMPLATES_AUTO_RELOAD`로 재시작 없이 반영
 - okadmin(8090)은 수정하지 않고 읽기·import만 사용 (`git_ops` · `github_ops` · `gsc_seo_worker` · `gsc_run_store` · `gsc_url_store` · 트렌드 · 토픽 뱅크). `workers._okadmin_import()`로 경로 추가
 - 사이트 목록: `/opt/work/sites.yaml` (okadmin과 공유)
 - 비밀값: GCP Secret Manager(프로젝트 `starful-258005`) 우선, 없으면 `okadmin/.env` (`app/gsecrets.py`)
@@ -129,11 +129,15 @@ content 타입별 쓰기·리서치·slug·레이아웃. UI seed/topics는 kit�
 ## 8. 자동 진행 (`autoship.py` · `workers.py`)
 
 - `LOOP_SEC = 180` · `KICK_DELAY = 4.0`. 꺼진 층은 스킵
-- stage: changes → pr → (고치기) → deploy → check / stuck / idle
+- stage: changes → pr → (고치기) → deploy → check / stuck / idle. UI: 현황 `ss-actions` 한 줄(회의 결과 · 올렸어요 · 사이트 열기 · 확인). 개발 탭·상세에 확인 칩·「반영」블록 없음(API 라우트는 유지)
+- 층 자동 진행 토글: 헤더 층 선택 메뉴(`_site_switch.html` · `POST /office/<id>/autoship`)만. 팀 탭·상세에는 없음
 - changes: `issue_pr` (okadmin `github_ops.ship_prepare`)
 - pr: `review_and_merge`. 리뷰는 Claude가 「판정: / 요약 / 필수 / 제안」 줄 → `split_review`
   - `_is_none`: 「필수: 없음 (설명)」은 없음으로 · `_is_resolved_note`: 「이전 필수…해결됨」 제외
   - 고치기 입구 `start_fix_for_review`: 코드 필수 → `devwork.fix_review`(fix_code) · 글만 → `fix_from_review`(fix)
+  - `fix_review` / `fix_from_review` / `push_fixes`는 `ensure_pr_branch`로 PR 브랜치로 맞춘 뒤 작업(브랜치 불일치로 바로 실패하지 않음)
+  - `sync_merged_pr_from_github`: GitHub에 이미 머지됐는데 `flow.merged=false`면 autoship·고치기·stage에서 동기화해 같은 실패 루프를 끊음. `pr=null`인데 `merged=false`인 낡은 flow도 정리
+  - `ensure_on_main_if_idle`: 열린 PR이 없으면 로컬 HEAD를 main으로 되돌림(머지 후 feat에 남아 「main에서만 올려요」로 배포가 며칠씩 막히던 것 방지)
   - `MAX_FIX_ROUNDS = 2` 후 머지, 남은 건 `followups.md`. 변경 없는 push도 1회로 셈
   - 에이전트 금지 경로만 남으면 후속 이슈로 두고 머지
   - GitHub에서 이미 머지됐으면 로컬 pull 실패와 무관하게 `flow.merged = True`
@@ -201,3 +205,4 @@ content 타입별 쓰기·리서치·slug·레이아웃. UI seed/topics는 kit�
 - 서버 재시작으로 끊긴 잡 실패 많음(「잡이 끊김」 79건) → 재시작 후 자동 재담기 검토
 - 「회의 결과 파일이 없어요」 18건 원인 미확인
 - 반복 실패: 「리뷰에 적힌 파일을 PR에서 찾지 못했어요」 · `.gitignore` 되돌림 · 미커밋 `_data.json`
+- (고침 2026-11-05) 「지금 브랜치가 PR 브랜치가 아니에요」 루프: `fix_review`가 checkout 없이 실패 + GitHub 머지 후 `flow.merged` 미동기화 → `ensure_pr_branch` · `sync_merged_pr_from_github`

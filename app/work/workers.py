@@ -1038,7 +1038,7 @@ def fix_from_review(work) -> str:
     """서연: fix the files the review points at, commit + push to the same PR, then hand back to 다은."""
     tools.need("claude", "gh")
     _okadmin_import()
-    from git_ops import git_commit_only, git_current_branch, git_push_only
+    from git_ops import git_commit_only, git_push_only
     from llm_claude import MODEL_HEAVY, MODEL_LIGHT, claude_json, claude_text
 
     flow = office.read_flow()
@@ -1050,10 +1050,10 @@ def fix_from_review(work) -> str:
     fixed: list[str] = []
     skipped: list[str] = []
     with work.git_turn():
-        if branch and git_current_branch(OKPY) != branch:
-            sw = _git("checkout", branch)
-            if sw.returncode != 0:
-                raise RuntimeError(f"PR 브랜치 {branch}로 못 바꿨어요: {_ko(sw.stderr)}")
+        synced = sync_merged_pr_from_github()
+        if synced:
+            return synced
+        ensure_pr_branch(branch)
         names = [n.strip() for n in _git("diff", "--name-only", "main...HEAD").stdout.splitlines() if n.strip()]
         posts = [n for n in names if n.endswith(".md") and (OKPY / n).is_file()]
         if not posts:
@@ -1103,17 +1103,99 @@ def fix_from_review(work) -> str:
     return f"{len(fixed)}개 파일을 고쳤어요 · 개발팀이 바빠요. 끝나면 '푸시' 버튼을 눌러 주세요"
 
 
+def ensure_pr_branch(branch: str) -> None:
+    """Switch the site repo onto the open PR branch. Call inside work.git_turn()."""
+    branch = (branch or "").strip()
+    if not branch:
+        return
+    cur = _git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if cur == branch:
+        return
+    sw = _git("checkout", branch)
+    if sw.returncode != 0:
+        _git("fetch", "origin", branch, timeout=120)
+        sw = _git("checkout", branch)
+    if sw.returncode != 0:
+        raise RuntimeError(f"PR 브랜치 {branch}로 못 바꿨어요: {_ko(sw.stderr)}")
+
+
+def ensure_on_main_if_idle() -> bool:
+    """When no open PR is tracked, put the site repo back on main/master.
+
+    Deploy and content jobs expect main. After an outside merge (or a leftover
+    feat/ checkout), local HEAD often stays on the feature branch and every
+    deploy fails with 「main에서만 올려요」 for days. Returns True if switched.
+    """
+    flow = office.read_flow()
+    if flow.get("pr") and not flow.get("merged"):
+        return False
+    cur = _git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if cur in ("main", "master", "HEAD", ""):
+        return False
+    sw = _git("checkout", "main")
+    if sw.returncode != 0:
+        sw = _git("checkout", "master")
+    if sw.returncode != 0:
+        print(f"ensure_on_main_if_idle: {_ko(sw.stderr)}", file=sys.stderr)
+        return False
+    _git("pull", "--ff-only")
+    return True
+
+
+def sync_merged_pr_from_github() -> str | None:
+    """If flow still says the PR is open but GitHub already merged it, mark merged locally.
+
+    Stops autoship from looping forever on fix_review after a manual / outside merge.
+    Returns a short status message when synced, else None.
+    """
+    flow = office.read_flow()
+    # Stale: PR already cleared / deployed but merged flag never flipped
+    if not flow.get("pr") and not flow.get("merged") and (flow.get("deployed") or flow.get("merged_at") or flow.get("last_pr")):
+        office.write_flow(merged=True)
+        ensure_on_main_if_idle()
+        return None
+    pr = flow.get("pr") if isinstance(flow.get("pr"), dict) else None
+    number = (pr or {}).get("number")
+    if not number or flow.get("merged"):
+        ensure_on_main_if_idle()
+        return None
+    tools.need("gh")
+    proc = subprocess.run(
+        ["gh", "pr", "view", str(int(number)), "--json", "state,mergedAt"],
+        cwd=str(OKPY), capture_output=True, text=True, timeout=60,
+    )
+    if proc.returncode != 0:
+        # Deleted branch / unknown PR after squash-merge — treat as merged when branch is gone
+        err = (proc.stderr or proc.stdout or "").lower()
+        if "could not find" in err or "not found" in err or "no pull requests" in err:
+            office.write_flow(merged=True, deployed=False, merged_at=snapshot.now_stamp(), then_common=False)
+            ensure_on_main_if_idle()
+            return f"PR #{number}을 찾지 못했어요(이미 머지·삭제된 듯) · 배포 차례로 넘길게요"
+        return None
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+    if str(data.get("state") or "").upper() != "MERGED" and not data.get("mergedAt"):
+        return None
+    office.write_flow(merged=True, deployed=False, merged_at=snapshot.now_stamp(), then_common=False)
+    ensure_on_main_if_idle()
+    return f"PR #{number}은 이미 머지됐어요 · 배포 차례로 넘길게요"
+
+
 def push_fixes(work, fixed: list[str] | None = None) -> str:
     """도윤: commit + push the review fixes to the open PR branch, then hand it back to 다은."""
     tools.need("gh")
     _okadmin_import()
-    from git_ops import git_commit_only, git_current_branch, git_push_only
+    from git_ops import git_commit_only, git_push_only
 
     flow = office.read_flow()
     branch = str(flow.get("branch") or "").strip()
     with work.git_turn():
-        if branch and git_current_branch(OKPY) != branch:
-            raise RuntimeError(f"지금 브랜치가 PR 브랜치({branch})가 아니에요")
+        synced = sync_merged_pr_from_github()
+        if synced:
+            return synced
+        ensure_pr_branch(branch)
         if not _git("status", "--porcelain").stdout.strip():
             # nothing changed: count it as a round anyway, or 자동 진행 hands out the same fix forever
             office.write_flow(review_round=int(flow.get("review_round") or 0) + 1)
