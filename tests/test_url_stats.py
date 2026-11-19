@@ -104,3 +104,14 @@ def test_site_name_tail_removed_even_when_rare():
     rows.append({"page": "/y", "title": "컵라면 추천 - OK Ramen", "views": 1})
     t = url_stats.page_titles(rows, ("OK Ramen", "okramen"))
     assert t["/x"] == "Best Japan Ramen Souvenirs" and t["/y"] == "컵라면 추천" and t["/p1"] == "Plain title 1"
+
+
+def test_site_name_tail_without_spaces_or_fullwidth_bar():
+    names = ("OKPy", "okpy")
+    t = url_stats.page_titles([
+        {"page": "/a", "title": "PyArrowで大規模データ処理を10倍高速化する【完全ガイド】— OKPy", "views": 1},
+        {"page": "/b", "title": "Bokehで2軸グラフ｜OKPy", "views": 1},
+        {"page": "/c", "title": "FastAPI - Pydantic v2 入門", "views": 1},
+    ], names)
+    assert t == {"/a": "PyArrowで大規模データ処理を10倍高速化する【完全ガイド】", "/b": "Bokehで2軸グラフ",
+                 "/c": "FastAPI - Pydantic v2 入門"}
