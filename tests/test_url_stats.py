@@ -83,3 +83,16 @@ def test_long_titles_stay_on_one_line():
     assert ".su-urls-table .su-url a { display: block; overflow: hidden; text-overflow: ellipsis; }" in css
     html = (Path(__file__).resolve().parents[1] / "app/templates/_url_stats.html").read_text()
     assert "data-su-find" not in html and 'data-su-sort="title"' in html
+
+
+def test_site_tail_removed_whatever_separator():
+    t = url_stats.page_titles([
+        {"page": "/a", "title": "Ramen After Drinking | OKRamen", "views": 3},
+        {"page": "/b", "title": "일본 편의점 컵라면 추천 베스트 5 | 세븐일레븐 & 로손 - OKRamen", "views": 2},
+        {"page": "/c", "title": "Lawson Ramen Guide — OKRamen", "views": 1},
+        {"page": "/d", "title": "Tonkotsu vs Shoyu - which to order first", "views": 1},
+    ])
+    assert t["/a"] == "Ramen After Drinking"
+    assert t["/b"] == "일본 편의점 컵라면 추천 베스트 5 | 세븐일레븐 & 로손"
+    assert t["/c"] == "Lawson Ramen Guide"
+    assert t["/d"] == "Tonkotsu vs Shoyu - which to order first"

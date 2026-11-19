@@ -33,19 +33,31 @@ def path_key(url: str) -> str:
     return path.rstrip("/") or "/"
 
 
+SEPS = (" | ", " - ", " — ", " – ", " · ")
+
+
 def _strip_suffix(titles: dict[str, str]) -> dict[str, str]:
-    """Drop the site-name tail most titles share (「… | OK Ramen」 · 「… - OKPy」 · 「… — KR Care」)."""
+    """Drop the site-name tail most titles share, whatever separator each page used
+    (「… | OKRamen」 · 「… - OKRamen」 · 「… — KR Care」)."""
     tails: dict[str, int] = {}
     for t in titles.values():
-        for sep in (" | ", " - ", " — ", " – ", " · "):
+        seen = set()
+        for sep in SEPS:
             if sep in t:
-                tails[sep + t.rsplit(sep, 1)[1]] = tails.get(sep + t.rsplit(sep, 1)[1], 0) + 1
-    common = [k for k, n in tails.items() if n >= max(2, len(titles) // 2)]
+                tail = t.rsplit(sep, 1)[1].strip().lower()
+                if tail and tail not in seen:
+                    seen.add(tail)
+                    tails[tail] = tails.get(tail, 0) + 1
+    need = max(2, len(titles) // 3)
+    common = {k for k, n in tails.items() if n >= need and len(k) <= 40}
     out = {}
     for p, t in titles.items():
-        for tail in common:
-            if t.endswith(tail) and len(t) > len(tail):
-                t = t[: -len(tail)]
+        for sep in SEPS:
+            if sep in t and t.rsplit(sep, 1)[1].strip().lower() in common:
+                head = t.rsplit(sep, 1)[0].strip()
+                if head:
+                    t = head
+                break
         out[p] = t.strip()
     return out
 
