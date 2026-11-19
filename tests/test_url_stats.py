@@ -115,3 +115,18 @@ def test_site_name_tail_without_spaces_or_fullwidth_bar():
     ], names)
     assert t == {"/a": "PyArrowで大規模データ処理を10倍高速化する【完全ガイド】", "/b": "Bokehで2軸グラフ",
                  "/c": "FastAPI - Pydantic v2 入門"}
+
+
+def test_double_tail_from_real_okonsen_titles():
+    names = ("OK Onsen", "okonsen")
+    rows = [{"page": f"/g{i}", "title": f"Guide {i} - OKOnsen Guide", "views": 1} for i in range(4)]
+    rows += [
+        {"page": "/guide/guide_expand_008_en", "views": 7,
+         "title": "Japan Konbini Guide: Food, ATMs, Wi-Fi & Travel Tips | OKOnsen - OKOnsen Guide"},
+        {"page": "/onsen/kasho", "views": 2,
+         "title": "Jozankei Onsen Kasho Gyoen: Riverside Ryokan Near Sapporo - OKOnsen - OKOnsen Guide"},
+    ]
+    t = url_stats.page_titles(rows, names)
+    assert t["/guide/guide_expand_008_en"] == "Japan Konbini Guide: Food, ATMs, Wi-Fi & Travel Tips"
+    assert t["/onsen/kasho"] == "Jozankei Onsen Kasho Gyoen: Riverside Ryokan Near Sapporo"
+    assert t["/g1"] == "Guide 1"
