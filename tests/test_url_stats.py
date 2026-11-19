@@ -96,3 +96,11 @@ def test_site_tail_removed_whatever_separator():
     assert t["/b"] == "일본 편의점 컵라면 추천 베스트 5 | 세븐일레븐 & 로손"
     assert t["/c"] == "Lawson Ramen Guide"
     assert t["/d"] == "Tonkotsu vs Shoyu - which to order first"
+
+
+def test_site_name_tail_removed_even_when_rare():
+    rows = [{"page": f"/p{i}", "title": f"Plain title {i}", "views": 1} for i in range(10)]
+    rows.append({"page": "/x", "title": "Best Japan Ramen Souvenirs | OKRamen", "views": 1})
+    rows.append({"page": "/y", "title": "컵라면 추천 - OK Ramen", "views": 1})
+    t = url_stats.page_titles(rows, ("OK Ramen", "okramen"))
+    assert t["/x"] == "Best Japan Ramen Souvenirs" and t["/y"] == "컵라면 추천" and t["/p1"] == "Plain title 1"
