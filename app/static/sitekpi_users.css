@@ -93,3 +93,4 @@
 .su-urls-table .su-url a:hover { text-decoration: underline; }
 .su-urls-table td.z { color: #a39d90; }
 .su-urls-table tbody tr:hover { background: #f7f4ec; }
+.su-dlg [data-su-pane][hidden] { display: none; }
