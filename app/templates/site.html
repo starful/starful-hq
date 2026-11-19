@@ -928,12 +928,6 @@
         });
         rows.forEach((r) => body.appendChild(r));
     }
-    document.addEventListener("input", (ev) => {
-        const t = ev.target;
-        if (!(t instanceof Element) || !t.matches("[data-su-find]")) return;
-        const q = t.value.trim().toLowerCase();
-        document.querySelectorAll("#su-urls tr[data-path]").forEach((r) => { r.hidden = q && !r.dataset.path.toLowerCase().includes(q); });
-    });
     function suLoad(url, reopen) {
         const card = document.getElementById("su-card");
         if (!card || suBusy) return;

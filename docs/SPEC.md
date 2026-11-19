@@ -190,7 +190,7 @@ content 타입별 쓰기·리서치·slug·레이아웃. UI seed/topics는 kit�
   - 그 외 → `ga4_users` (GA4 「많이 본 페이지 · 활성 사용자 순」 폴백)
 - 사이트 쪽: `POST /events` 수집 + `GET /hq/api/users`. 공유 키트 `/opt/work/_shared/visitkit/`를 각 사이트 repo에 vendor (`visitkit/` · `visit_track.js`)
 - visitlog live (2026-11-19): okpy · jpcampus · krcampus · companydb · okcaddie · okonsen · okramen · jpfun · krcare (9곳 전부). `hq.visitlog`가 없는 사이트만 GA4 폴백
-- 「URL별 숫자」 탭: `GET /site/{id}/urls?days=7|30|90[&fresh=1]` → `_url_stats.html`. `app/url_stats.py`가 GA4 `fetch_ga4_pages`(조회·사용자·세션) + GSC `fetch_gsc_pages`(클릭·노출·CTR·순위, 노출 상위 500 URL)를 경로(쿼리·끝 `/` 제외)로 합침. 조회수순 최대 500행 · 열 머리 눌러 정렬 · URL 찾기. 캐시 5분. 테스트 `tests/test_url_stats.py`
+- 「URL별 숫자」 탭: `GET /site/{id}/urls?days=7|30|90[&fresh=1]` → `_url_stats.html`. `app/url_stats.py`가 GA4 `fetch_ga4_pages`(조회·사용자·세션) + GSC `fetch_gsc_pages`(클릭·노출·CTR·순위, 노출 상위 500 URL)를 경로(쿼리·끝 `/` 제외)로 합침. 첫 열은 GA4 `pageTitle`(조회 많은 제목 · 사이트 이름 꼬리 뺌, 없으면 경로) 한 줄 말줄임 · 마우스 올리면 전체 제목+경로 · 누르면 페이지 열림. 조회수순 최대 500행 · 열 머리 눌러 정렬. 캐시 5분. 테스트 `tests/test_url_stats.py`
 - 화면: `_site_users.html` · `static/sitekpi_users.css`. 테스트 `tests/test_site_users.py` · `tests/test_sitekpi_users.py` · `tests/test_visitkit_summarize.py`
 
 ## 12. 사장 로그인 · 도구

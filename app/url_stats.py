@@ -1,4 +1,4 @@
-"""URL별 숫자 — 사이트의 페이지마다 GA4(조회·사용자·세션) + GSC(검색 클릭·노출·CTR·순위)를 한 표로.
+"""URL별 숫자 — 사이트의 페이지(제목)마다 GA4(조회·사용자·세션) + GSC(검색 클릭·노출·CTR·순위)를 한 표로.
 
 「이용자 보기」 dialog의 「URL별 숫자」 탭이 부른다. 모든 사이트 공통(visitlog 여부와 무관).
 GA4 pagePath와 GSC page URL은 경로(쿼리·끝 / 제외)로 맞춘다.
@@ -33,7 +33,50 @@ def path_key(url: str) -> str:
     return path.rstrip("/") or "/"
 
 
-def merge_rows(ga4_rows: list[dict[str, Any]], gsc_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _strip_suffix(titles: dict[str, str]) -> dict[str, str]:
+    """Drop the site-name tail most titles share (「… | OK Ramen」 · 「… - OKPy」 · 「… — KR Care」)."""
+    tails: dict[str, int] = {}
+    for t in titles.values():
+        for sep in (" | ", " - ", " — ", " – ", " · "):
+            if sep in t:
+                tails[sep + t.rsplit(sep, 1)[1]] = tails.get(sep + t.rsplit(sep, 1)[1], 0) + 1
+    common = [k for k, n in tails.items() if n >= max(2, len(titles) // 2)]
+    out = {}
+    for p, t in titles.items():
+        for tail in common:
+            if t.endswith(tail) and len(t) > len(tail):
+                t = t[: -len(tail)]
+        out[p] = t.strip()
+    return out
+
+
+def page_titles(rows: list[dict[str, Any]]) -> dict[str, str]:
+    """GA4 (pagePath, pageTitle, views) rows → {path: title with the most views}."""
+    best: dict[str, tuple[int, str]] = {}
+    for r in rows or []:
+        key = path_key(r.get("page") or "/")
+        title = str(r.get("title") or "").strip()
+        if not title or title == "(not set)":
+            continue
+        views = int(r.get("views") or 0)
+        if key not in best or views > best[key][0]:
+            best[key] = (views, title)
+    return _strip_suffix({k: v[1] for k, v in best.items()})
+
+
+def _fetch_titles(prop: str, days: int) -> list[dict[str, Any]]:
+    from analytics_api import _ga4_run_report, _ga4_window
+    start, end = _ga4_window(days, None)
+    raw = _ga4_run_report(prop, dimensions=["pagePath", "pageTitle"], metrics=["screenPageViews"],
+                          start=start, end=end, row_limit=5000, order_metric="screenPageViews", desc=True)
+    if raw.get("error"):
+        return []
+    return [{"page": (r.get("dims") or ["", ""])[0], "title": (r.get("dims") or ["", ""])[1],
+             "views": int((r.get("metrics") or [0])[0] or 0)} for r in raw.get("rows") or []]
+
+
+def merge_rows(ga4_rows: list[dict[str, Any]], gsc_rows: list[dict[str, Any]],
+               titles: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """One row per path. Sorted by 조회수, then 검색 클릭."""
     by: dict[str, dict[str, Any]] = {}
 
@@ -57,6 +100,7 @@ def merge_rows(ga4_rows: list[dict[str, Any]], gsc_rows: list[dict[str, Any]]) -
         imp = x["impressions"]
         x["ctr"] = round(x["clicks"] / imp * 100, 1) if imp else None
         x["position"] = round(x.pop("_pos_w") / imp, 1) if imp else None
+        x["title"] = (titles or {}).get(x["path"], "")
         out.append(x)
     out.sort(key=lambda x: (-x["views"], -x["clicks"], -x["impressions"], x["path"]))
     return out
@@ -97,9 +141,11 @@ def fetch(site_id: str, days: int = 7, fresh: bool = False) -> dict[str, Any]:
 
     ga4: dict[str, Any] = {}
     gsc: dict[str, Any] = {}
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    title_rows: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=3) as pool:
         f_ga4 = pool.submit(fetch_ga4_pages, prop, days=days) if prop else None
         f_gsc = pool.submit(fetch_gsc_pages, gsc_url, days=days) if gsc_url else None
+        f_title = pool.submit(_fetch_titles, prop, days) if prop else None
         for name, fut in (("ga4", f_ga4), ("gsc", f_gsc)):
             if not fut:
                 continue
@@ -111,13 +157,18 @@ def fetch(site_id: str, days: int = 7, fresh: bool = False) -> dict[str, Any]:
                 ga4 = res
             else:
                 gsc = res
+        if f_title:
+            try:
+                title_rows = f_title.result() or []
+            except Exception:  # noqa: BLE001 - titles are a nicety; the path still shows
+                title_rows = []
 
     warn = []
     if ga4.get("error"):
         warn.append(f"GA4: {str(ga4['error'])[:80]}")
     if gsc.get("error"):
         warn.append(f"GSC: {str(gsc['error'])[:80]}")
-    rows = merge_rows(ga4.get("rows") or [], gsc.get("rows") or [])
+    rows = merge_rows(ga4.get("rows") or [], gsc.get("rows") or [], page_titles(title_rows))
     if not rows and warn:
         return {**base, "error": " · ".join(warn)}
 

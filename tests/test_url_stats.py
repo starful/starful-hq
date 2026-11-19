@@ -61,3 +61,25 @@ def test_users_dialog_has_url_tab(monkeypatch):
         "ok": True, "kind": "ga4", "days": days, "btn": "이용자 보기", "title": "t", "kpis": [], "funnel": []})
     html = flask_app.test_client().get("/site/okramen/users").get_data(as_text=True)
     assert 'data-su-tab="urls"' in html and 'id="su-urls"' in html and "/site/okramen/urls" in html
+
+
+def test_page_titles_pick_most_viewed_and_drop_site_tail():
+    rows = [
+        {"page": "/guide/ramen-prices", "title": "How much is ramen in Japan? | OK Ramen", "views": 50},
+        {"page": "/guide/ramen-prices/", "title": "Old title | OK Ramen", "views": 3},
+        {"page": "/shops/ichiran", "title": "Ichiran Shibuya | OK Ramen", "views": 9},
+        {"page": "/", "title": "(not set)", "views": 4},
+    ]
+    t = url_stats.page_titles(rows)
+    assert t == {"/guide/ramen-prices": "How much is ramen in Japan?", "/shops/ichiran": "Ichiran Shibuya"}
+    merged = url_stats.merge_rows([{"page": "/shops/ichiran", "pageviews": 9, "users": 5, "sessions": 5},
+                                   {"page": "/", "pageviews": 4, "users": 2, "sessions": 2}], [], t)
+    assert {r["path"]: r["title"] for r in merged} == {"/shops/ichiran": "Ichiran Shibuya", "/": ""}
+
+
+def test_long_titles_stay_on_one_line():
+    from pathlib import Path
+    css = (Path(__file__).resolve().parents[1] / "app/static/sitekpi_users.css").read_text()
+    assert ".su-urls-table .su-url a { display: block; overflow: hidden; text-overflow: ellipsis; }" in css
+    html = (Path(__file__).resolve().parents[1] / "app/templates/_url_stats.html").read_text()
+    assert "data-su-find" not in html and 'data-su-sort="title"' in html
