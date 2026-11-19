@@ -36,7 +36,11 @@ def path_key(url: str) -> str:
 SEPS = (" | ", " - ", " — ", " – ", " · ")
 
 
-def _strip_suffix(titles: dict[str, str]) -> dict[str, str]:
+def _norm(x: str) -> str:
+    return "".join(ch for ch in str(x or "").lower() if ch.isalnum())
+
+
+def _strip_suffix(titles: dict[str, str], names: tuple[str, ...] = ()) -> dict[str, str]:
     """Drop the site-name tail most titles share, whatever separator each page used
     (「… | OKRamen」 · 「… - OKRamen」 · 「… — KR Care」)."""
     tails: dict[str, int] = {}
@@ -50,6 +54,8 @@ def _strip_suffix(titles: dict[str, str]) -> dict[str, str]:
                     tails[tail] = tails.get(tail, 0) + 1
     need = max(2, len(titles) // 3)
     common = {k for k, n in tails.items() if n >= need and len(k) <= 40}
+    site_names = {_norm(n) for n in names if _norm(n)}
+    common |= {k for k in tails if _norm(k) in site_names}
     out = {}
     for p, t in titles.items():
         for sep in SEPS:
@@ -62,7 +68,7 @@ def _strip_suffix(titles: dict[str, str]) -> dict[str, str]:
     return out
 
 
-def page_titles(rows: list[dict[str, Any]]) -> dict[str, str]:
+def page_titles(rows: list[dict[str, Any]], names: tuple[str, ...] = ()) -> dict[str, str]:
     """GA4 (pagePath, pageTitle, views) rows → {path: title with the most views}."""
     best: dict[str, tuple[int, str]] = {}
     for r in rows or []:
@@ -73,7 +79,7 @@ def page_titles(rows: list[dict[str, Any]]) -> dict[str, str]:
         views = int(r.get("views") or 0)
         if key not in best or views > best[key][0]:
             best[key] = (views, title)
-    return _strip_suffix({k: v[1] for k, v in best.items()})
+    return _strip_suffix({k: v[1] for k, v in best.items()}, names)
 
 
 def _fetch_titles(prop: str, days: int) -> list[dict[str, Any]]:
@@ -180,7 +186,7 @@ def fetch(site_id: str, days: int = 7, fresh: bool = False) -> dict[str, Any]:
         warn.append(f"GA4: {str(ga4['error'])[:80]}")
     if gsc.get("error"):
         warn.append(f"GSC: {str(gsc['error'])[:80]}")
-    rows = merge_rows(ga4.get("rows") or [], gsc.get("rows") or [], page_titles(title_rows))
+    rows = merge_rows(ga4.get("rows") or [], gsc.get("rows") or [], page_titles(title_rows, (site.label, site.id, site.oid, (site.domain or "").split(".")[0])))
     if not rows and warn:
         return {**base, "error": " · ".join(warn)}
 
