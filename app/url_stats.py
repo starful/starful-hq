@@ -60,15 +60,20 @@ def _strip_suffix(titles: dict[str, str], names: tuple[str, ...] = ()) -> dict[s
     common |= {k for k in tails if _norm(k) in site_names}
     out = {}
     for p, t in titles.items():
-        m = _TAIL.search(t)
-        if m and site_names and _norm(m.group(1)) in site_names and t[: m.start()].strip():
-            out[p] = t[: m.start()].strip()   # 「…】— OKPy」 · 「…｜KR Campus」: site name after any dash/bar
-            continue
-        for sep in SEPS:
-            if sep in t and t.rsplit(sep, 1)[1].strip().lower() in common:
-                head = t.rsplit(sep, 1)[0].strip()
-                if head:
-                    t = head
+        # Some titles carry two tails (「… | OKOnsen - OKOnsen Guide」): peel until nothing changes.
+        for _ in range(3):
+            before = t
+            m = _TAIL.search(t)
+            if m and site_names and _norm(m.group(1)) in site_names and t[: m.start()].strip():
+                t = t[: m.start()].strip()   # 「…】— OKPy」 · 「…｜KR Campus」: site name after any dash/bar
+                continue
+            for sep in SEPS:
+                if sep in t and t.rsplit(sep, 1)[1].strip().lower() in common:
+                    head = t.rsplit(sep, 1)[0].strip()
+                    if head:
+                        t = head
+                    break
+            if t == before:
                 break
         out[p] = t.strip()
     return out
