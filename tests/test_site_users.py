@@ -64,7 +64,11 @@ def test_ga4_users_builds_pages_and_channels(monkeypatch):
     api.site_analytics_config = lambda oid: {"ga4_property_id": "123"}
     sys.modules["analytics_api"] = api
 
-    u = site_users.fetch("krcare", 7)  # no hq.visitlog → GA4 fallback
+    import dataclasses
+    from app import sites
+    # a site without hq.visitlog → GA4 fallback (all live sites have visitlog now)
+    monkeypatch.setitem(sites.SITES, "krcare", dataclasses.replace(sites.SITES["krcare"], visitlog=False))
+    u = site_users.fetch("krcare", 7)
     assert u["ok"] and u["kind"] == "ga4" and u["survey_on"] is False
     assert u["btn"] == "이용자 보기"
     assert u["kpis"][0]["value"] == 10

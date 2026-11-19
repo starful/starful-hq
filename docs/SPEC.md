@@ -189,7 +189,7 @@ content 타입별 쓰기·리서치·slug·레이아웃. UI seed/topics는 kit�
   - `hq.visitlog: true` → `visitlog_users`가 `https://{domain}/hq/api/users`를 Bearer로 읽음. 토큰 = HMAC(`VISITLOG_SECRET`, `visitlog-hq-api-v1:{site}`), 비밀값은 Secret Manager `VISITLOG_SECRET`. 방문자 표 → 오른쪽에 방문 흐름 (설문 없음)
   - 그 외 → `ga4_users` (GA4 「많이 본 페이지 · 활성 사용자 순」 폴백)
 - 사이트 쪽: `POST /events` 수집 + `GET /hq/api/users`. 공유 키트 `/opt/work/_shared/visitkit/`를 각 사이트 repo에 vendor (`visitkit/` · `visit_track.js`)
-- visitlog live (2026-11-19): okpy · jpcampus · krcampus · companydb · okcaddie · okonsen · okramen · jpfun. krcare는 GA4 폴백
+- visitlog live (2026-11-19): okpy · jpcampus · krcampus · companydb · okcaddie · okonsen · okramen · jpfun · krcare (9곳 전부). `hq.visitlog`가 없는 사이트만 GA4 폴백
 - 화면: `_site_users.html` · `static/sitekpi_users.css`. 테스트 `tests/test_site_users.py` · `tests/test_sitekpi_users.py` · `tests/test_visitkit_summarize.py`
 
 ## 12. 사장 로그인 · 도구
