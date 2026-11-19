@@ -57,6 +57,7 @@ def _strip_suffix(titles: dict[str, str], names: tuple[str, ...] = ()) -> dict[s
     need = max(2, len(titles) // 3)
     common = {k for k, n in tails.items() if n >= need and len(k) <= 40}
     site_names = {_norm(n) for n in names if _norm(n)}
+    site_names |= {n + "guide" for n in site_names}   # 「… - KR Care Guide」 (guide pages)
     common |= {k for k in tails if _norm(k) in site_names}
     out = {}
     for p, t in titles.items():
