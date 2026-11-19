@@ -1,0 +1,53 @@
+{#- URL별 숫자 (이용자 보기 dialog 탭 안). Needs: s (url_stats.fetch). -#}
+<div class="su-urls" id="su-urls-body" data-days="{{ s.days }}">
+    {% if not s.ok %}
+    <p class="hint warn">{{ s.error }}</p>
+    {% else %}
+    {% set t = s.totals %}
+    <p class="sku-sub su-urls-meta">{{ s.total_rows }}개 페이지{% if s.total_rows > s.rows|length %} · 위 {{ s.rows|length }}개만{% endif %} · 최근 {{ s.days }}일 · {{ s.generated_at }} 기준{% if s.cached %} · 캐시{% endif %} · 제목을 누르면 그 페이지가 열려요</p>
+    {% if s.warn %}<p class="sku-stuck">{{ s.warn }}</p>{% endif %}
+    <div class="sku-scroll su-urls-scroll">
+        <table class="su-urls-table" data-su-table>
+            <thead>
+                <tr>
+                    <th scope="col"><button type="button" data-su-sort="title" data-type="text">페이지</button></th>
+                    <th scope="col" class="r"><button type="button" data-su-sort="views" aria-sort="descending">조회수</button></th>
+                    <th scope="col" class="r"><button type="button" data-su-sort="users">사용자</button></th>
+                    <th scope="col" class="r"><button type="button" data-su-sort="sessions">세션</button></th>
+                    <th scope="col" class="r"><button type="button" data-su-sort="clicks">검색 클릭</button></th>
+                    <th scope="col" class="r"><button type="button" data-su-sort="impressions">검색 노출</button></th>
+                    <th scope="col" class="r"><button type="button" data-su-sort="ctr">CTR</button></th>
+                    <th scope="col" class="r"><button type="button" data-su-sort="position" data-asc="1">순위</button></th>
+                </tr>
+                <tr class="su-urls-total">
+                    <th scope="row">합계</th>
+                    <td class="r">{{ '{:,}'.format(t.views) }}</td>
+                    <td class="r">{{ '{:,}'.format(t.users) }}</td>
+                    <td class="r">{{ '{:,}'.format(t.sessions) }}</td>
+                    <td class="r">{{ '{:,}'.format(t.clicks) }}</td>
+                    <td class="r">{{ '{:,}'.format(t.impressions) }}</td>
+                    <td class="r">{{ '%.1f%%' % t.ctr if t.ctr is not none else '—' }}</td>
+                    <td class="r">—</td>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in s.rows %}
+                <tr data-path="{{ r.path }}" data-title="{{ r.title or r.path }}" data-views="{{ r.views }}" data-users="{{ r.users }}" data-sessions="{{ r.sessions }}" data-clicks="{{ r.clicks }}" data-impressions="{{ r.impressions }}" data-ctr="{{ r.ctr if r.ctr is not none else -1 }}" data-position="{{ r.position if r.position is not none else 9999 }}">
+                    <th scope="row" class="su-url"><a href="https://{{ s.domain }}{{ r.path }}" target="_blank" rel="noopener" title="{{ (r.title ~ '\n') if r.title }}{{ r.path }}">{% if r.title %}{{ r.title }}{% else %}<span class="su-path">{{ r.path }}</span>{% endif %}</a></th>
+                    <td class="r{{ ' z' if not r.views }}">{{ '{:,}'.format(r.views) }}</td>
+                    <td class="r{{ ' z' if not r.users }}">{{ '{:,}'.format(r.users) }}</td>
+                    <td class="r{{ ' z' if not r.sessions }}">{{ '{:,}'.format(r.sessions) }}</td>
+                    <td class="r{{ ' z' if not r.clicks }}">{{ '{:,}'.format(r.clicks) }}</td>
+                    <td class="r{{ ' z' if not r.impressions }}">{{ '{:,}'.format(r.impressions) }}</td>
+                    <td class="r{{ ' z' if r.ctr is none }}">{{ '%.1f%%' % r.ctr if r.ctr is not none else '—' }}</td>
+                    <td class="r{{ ' z' if r.position is none }}">{{ '%.1f' % r.position if r.position is not none else '—' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="hint">이 기간에 숫자가 없어요.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="sku-note">조회수·사용자·세션 = GA4 (페이지 경로별) · 검색 클릭·노출·CTR·순위 = Search Console{% if s.gsc_cap %} (노출 많은 위 500개 URL까지){% endif %}. 페이지 이름은 GA4의 페이지 제목(사이트 이름 꼬리 뺌), 제목이 없으면 경로예요. 마우스를 올리면 전체 제목과 경로가 보여요. 경로는 쿼리·끝 「/」를 빼고 합쳤어요. 사용자 합계는 페이지별 합이라 실제 사람 수보다 클 수 있어요.</p>
+    {% endif %}
+</div>

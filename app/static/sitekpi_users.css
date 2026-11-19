@@ -70,3 +70,26 @@
 }
 .status-sum .ss-su-btn:disabled { opacity: .55; cursor: wait; }
 .su-mount { display: inline-flex; align-items: center; margin-left: 8px; }
+
+/* 이용자 보기 탭 · URL별 숫자 표 */
+.su-tabs { display: flex; gap: 4px; padding: 4px; background: #efe9dc; border-radius: 12px; }
+.su-tabs button { font: inherit; font-size: 13px; font-weight: 700; min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: none; color: #4b5466; cursor: pointer; }
+.su-tabs button[aria-pressed="true"] { background: #fff; color: #1f2633; box-shadow: 0 1px 2px rgba(31, 38, 51, 0.12); }
+.su-urls { display: flex; flex-direction: column; gap: 10px; }
+.su-urls-meta { margin: 0; }
+.su-urls-scroll { max-height: calc(100vh - 290px); overflow: auto; background: #fff; border: 1px solid #e6e0d2; border-radius: 12px; }
+.su-urls-table { width: 100%; min-width: 900px; table-layout: auto; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.su-urls-table th, .su-urls-table td { padding: 7px 10px; border-bottom: 1px solid #f0ebe0; text-align: left; white-space: nowrap; }
+.su-urls-table .r { text-align: right; }
+.su-urls-table thead tr:first-child th { position: sticky; top: 0; z-index: 2; background: #f7f4ec; }
+.su-urls-table thead .su-urls-total th, .su-urls-table thead .su-urls-total td { position: sticky; top: 35px; z-index: 1; background: #fffdf8; font-weight: 800; border-bottom: 2px solid #e6e0d2; }
+.su-urls-table thead button { font: inherit; font-size: 12px; font-weight: 800; color: #4b5466; background: none; border: 0; padding: 0; cursor: pointer; }
+.su-urls-table thead button[aria-sort="descending"]::after { content: " ▼"; font-size: 10px; }
+.su-urls-table thead button[aria-sort="ascending"]::after { content: " ▲"; font-size: 10px; }
+.su-urls-table .su-url { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.su-urls-table .su-url a { display: block; overflow: hidden; text-overflow: ellipsis; }
+.su-urls-table .su-path { color: #6b6455; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.su-urls-table .su-url a { color: #243f73; text-decoration: none; }
+.su-urls-table .su-url a:hover { text-decoration: underline; }
+.su-urls-table td.z { color: #a39d90; }
+.su-urls-table tbody tr:hover { background: #f7f4ec; }
