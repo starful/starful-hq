@@ -1,0 +1,99 @@
+{#- 사이트별 이용자 dialog. Needs: u (site_users.fetch). -#}
+{%- set k = u.kpis or [] %}
+{%- set survey_on = u.survey_on %}
+<span class="su-mount" id="su-card" data-url="{{ url_for('site_users_card') }}" data-days="{{ u.days }}" data-loaded="1">
+    <button type="button" class="ss-su-btn" data-su-open>{{ u.btn or '이용자 보기' }}</button>
+    {% if not u.ok %}
+    <dialog class="sku-dlg su-dlg" id="su-dlg" aria-labelledby="su-h">
+        <div class="sku-top">
+            <h2 id="su-h">👥 {{ u.title or '이용자' }}</h2>
+            <span class="sku-gap"></span>
+            <button type="button" class="sku-x" data-su-close aria-label="닫기">×</button>
+        </div>
+        <div class="sku-main"><p class="hint warn">{{ u.error }}</p></div>
+    </dialog>
+    {% else %}
+    <dialog class="sku-dlg su-dlg" id="su-dlg" aria-labelledby="su-h">
+        <div class="sku-top">
+            <h2 id="su-h">👥 {{ u.title or '이용자' }}</h2>
+            <span class="sku-sub">{{ u.subtitle }} · {{ u.generated_at }} 기준{% if u.cached %} · 캐시{% endif %}</span>
+            <span class="sku-gap"></span>
+            <nav class="sku-period" aria-label="기간">
+                {% for d in (7, 30, 90) %}<button type="button" data-su-days="{{ d }}" aria-pressed="{{ 'true' if d == u.days else 'false' }}">{{ d }}일</button>{% endfor %}
+                <button type="button" data-su-days="{{ u.days }}" data-su-fresh title="다시 받기">↻</button>
+            </nav>
+            <button type="button" class="sku-x" data-su-close aria-label="닫기">×</button>
+        </div>
+        <div class="sku-main">
+            <section class="sku-kpis" aria-label="요약">
+                {% for x in k %}<div class="sku-kpi"><span>{{ x.label }}</span><b>{{ x.value }}<small> {{ x.unit }}</small></b><em>{{ x.note }}</em></div>{% endfor %}
+            </section>
+            <div class="sku-row">
+                <section class="sku-card" aria-labelledby="su-flow">
+                    <h3 id="su-flow">어디까지 갔나 <small>{% if u.kind == 'ga4' %}페이지 경로 대략 · 사용자 수 겹칠 수 있음{% else %}방문자 수 · 한 번이라도 한 사람{% endif %}</small></h3>
+                    {% for f in u.funnel or [] %}
+                    <div class="sku-bar"><span>{{ f.label }}</span><i aria-hidden="true"><s style="width: {{ f.w }}%"></s></i><b>{{ f.n }} <small>{{ f.pct }}</small></b></div>
+                    {% else %}<p class="hint">아직 없어요.</p>{% endfor %}
+                    {% if u.stuck %}<p class="sku-stuck box">{{ u.stuck }}</p>{% endif %}
+                </section>
+                {% if survey_on %}
+                <section class="sku-card" aria-labelledby="su-why">
+                    <h3 id="su-why">왜 왔나 <small>30초 설문 · {{ u.answered }}명 답함</small></h3>
+                    {% for q in u.survey or [] %}
+                    <div class="sku-q"><b>{{ q.q }}</b>
+                        {% for r in q.rows %}<div class="sku-bar sm"><span>{{ r.label }}</span><i aria-hidden="true"><s style="width: {{ r.w }}%"></s></i><b>{{ r.n }}</b></div>
+                        {% else %}<p class="hint">아직 답이 없어요.</p>{% endfor %}
+                    </div>
+                    {% endfor %}
+                    <div class="sku-wish"><b>「이게 있으면 계속 쓴다」 (자유 기입)</b>
+                        {% for w in u.wishes or [] %}<p>{{ w.text }} <small>· {{ w.who }}</small></p>{% else %}<p class="hint">아직 없어요.</p>{% endfor %}
+                    </div>
+                </section>
+                {% else %}
+                <section class="sku-card" aria-labelledby="su-ch">
+                    <h3 id="su-ch">어디서 왔나 <small>GA4 세션 채널</small></h3>
+                    {% for r in u.channels or [] %}
+                    <div class="sku-bar sm"><span>{{ r.label }}</span><i aria-hidden="true"><s style="width: {{ r.w }}%"></s></i><b>{{ r.n }}</b></div>
+                    {% else %}<p class="hint">아직 없어요.</p>{% endfor %}
+                </section>
+                {% endif %}
+            </div>
+            {% if u.kind == 'ga4' %}
+            <div class="sku-row">
+                <section class="sku-card wide" aria-labelledby="su-pages">
+                    <h3 id="su-pages">많이 본 페이지 <small>활성 사용자 순</small></h3>
+                    <div class="sku-scroll">
+                        {% for r in u.pages or [] %}
+                        <div class="sku-bar"><span title="{{ r.label }}">{{ r.label }}</span><i aria-hidden="true"><s style="width: {{ r.w }}%"></s></i><b>{{ r.n }} <small>조회 {{ r.pageviews }}</small></b></div>
+                        {% else %}<p class="hint">이 기간에 조회가 없어요.</p>{% endfor %}
+                    </div>
+                </section>
+            </div>
+            {% else %}
+            <div class="sku-row">
+                <section class="sku-card wide" aria-labelledby="su-v">
+                    <h3 id="su-v">방문자 <small>줄을 누르면 오른쪽에 그 사람의 흐름</small></h3>
+                    <div class="sku-scroll"><div role="table" aria-label="방문자" class="sku-table{% if not survey_on %} no-why{% endif %}">
+                        <div role="row" class="sku-tr head"><span role="columnheader">방문자</span><span role="columnheader">처음 온 때</span><span role="columnheader">들어온 곳</span>{% if survey_on %}<span role="columnheader">온 이유 (설문)</span>{% endif %}<span role="columnheader">한 일</span><span role="columnheader" class="r">방문</span></div>
+                        {% for v in u.visitors or [] %}
+                        <div role="row" class="sku-tr{% if loop.first %} on{% endif %}" data-su-v="{{ loop.index0 }}"><span role="cell"><button type="button" data-su-pick="{{ loop.index0 }}">{{ v.id }}</button></span><span role="cell">{{ v.first }}</span><span role="cell">{{ v.from }}</span>{% if survey_on %}<span role="cell">{{ v.why }}</span>{% endif %}<span role="cell" class="q">{{ v.did }}</span><span role="cell" class="r">{{ v.visits }}</span></div>
+                        {% else %}<p class="hint">이 기간에 온 사람이 없어요.</p>{% endfor %}
+                    </div></div>
+                </section>
+                <aside class="sku-card side" aria-labelledby="su-t">
+                    {% for v in u.visitors or [] %}
+                    <div class="sku-tl" data-su-tl="{{ loop.index0 }}"{% if not loop.first %} hidden{% endif %}>
+                        <h3{% if loop.first %} id="su-t"{% endif %}>{{ v.id }}의 흐름</h3>
+                        <p class="sku-meta">{{ v.first }} 처음 · {{ v.from }}{% if v.role %} · {{ v.role }}{% endif %}{% if survey_on and v.why != '—' %} · {{ v.why }}{% endif %} · 방문 {{ v.visits }}번</p>
+                        <ol>{% for s in v.steps %}<li><span>{{ s.at }}</span><span><b class="{{ s.tone }}">{{ s.what }}</b> <small>{{ s.where }}</small></span></li>{% endfor %}</ol>
+                    </div>
+                    {% else %}<h3 id="su-t">흐름</h3><p class="hint">방문자를 고르면 보여요.</p>{% endfor %}
+                </aside>
+            </div>
+            {% endif %}
+            {% if u.note %}<p class="sku-note">{{ u.note }}</p>
+            {% elif survey_on %}<p class="sku-note">남기는 것: 익명 방문자 ID(브라우저 쿠키) · 화면 · 누른 버튼 · 시각 · 언어 · 들어온 곳(도메인만) · 설문 답. 남기지 않는 것: IP · Google 계정 · 이용자 GA4의 숫자·속성 이름. {{ u.keep_days or 90 }}일이 지나면 자동 삭제.</p>{% endif %}
+        </div>
+    </dialog>
+    {% endif %}
+</span>

@@ -1,0 +1,72 @@
+/* 👥 SiteKPI 이용자 (현황 버튼 → dialog). Design: HQ canvas 「09 SiteKPI 이용자」. */
+.sku-stuck { margin: 0 0 8px; font-size: 12px; font-weight: 700; color: #9a4a0c; }
+.sku-stuck.box { margin: 4px 0 0; padding: 8px 12px; border-radius: 10px; background: #fdf0e4; font-size: 13px; }
+.sku-dlg { width: min(1240px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; border: 0; border-radius: 18px; background: #f6f1e7; box-shadow: 0 24px 60px rgba(31, 38, 51, 0.35); color: #1f2633; }
+.sku-dlg::backdrop { background: rgba(31, 38, 51, 0.45); }
+.sku-top { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 20px; background: #fffdf8; border-bottom: 1px solid #e6e0d2; }
+.sku-top h2 { margin: 0; font-size: 18px; font-weight: 800; }
+.sku-sub { font-size: 12px; color: #6b6455; }
+.sku-gap { flex: 1 1 auto; }
+.sku-period { display: flex; gap: 4px; padding: 4px; background: #efe9dc; border-radius: 12px; }
+.sku-period button { font: inherit; font-size: 13px; font-weight: 700; min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: none; color: #4b5466; cursor: pointer; }
+.sku-period button[aria-pressed="true"] { background: #fff; color: #1f2633; box-shadow: 0 1px 2px rgba(31, 38, 51, 0.12); }
+.sku-x { font: inherit; width: 40px; height: 40px; border-radius: 10px; border: 1px solid #e6e0d2; background: #fff; font-size: 18px; font-weight: 700; color: #4b5466; cursor: pointer; }
+.sku-main { padding: 18px 20px 22px; display: flex; flex-direction: column; gap: 16px; }
+.sku-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.sku-kpi { background: #fff; border: 1px solid #e6e0d2; border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.sku-kpi span { font-size: 13px; font-weight: 700; color: #6b6455; }
+.sku-kpi b { font-size: 28px; font-weight: 800; line-height: 1.2; }
+.sku-kpi b small { font-size: 14px; color: #6b6455; }
+.sku-kpi em { font-style: normal; font-size: 12px; color: #6b6455; }
+.sku-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.sku-card { flex: 1 1 520px; min-width: 0; box-sizing: border-box; background: #fff; border: 1px solid #e6e0d2; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.sku-card.wide { flex: 999 1 640px; }
+.sku-card.side { flex: 1 1 380px; max-width: 460px; }
+.sku-card h3 { margin: 0; font-size: 17px; font-weight: 800; }
+.sku-card h3 small { font-size: 12px; font-weight: 500; color: #6b6455; }
+.sku-bar { display: grid; grid-template-columns: 150px minmax(0, 1fr) 70px; gap: 10px; align-items: center; font-size: 13px; }
+.sku-bar > span { font-weight: 700; }
+.sku-bar i { height: 14px; background: #f3efe6; border-radius: 99px; overflow: hidden; display: flex; }
+.sku-bar s { display: block; background: #2f6fed; border-radius: 99px; text-decoration: none; }
+.sku-bar > b { text-align: right; }
+.sku-bar > b small { font-weight: 500; color: #6b6455; }
+.sku-bar.sm { grid-template-columns: 210px minmax(0, 1fr) 28px; font-size: 12px; gap: 8px; }
+.sku-bar.sm > span { font-weight: 400; color: #4b5466; }
+.sku-bar.sm i { height: 10px; }
+.sku-bar.sm s { background: #7aa2f5; }
+.sku-q { display: flex; flex-direction: column; gap: 5px; }
+.sku-q > b { font-size: 13px; }
+.sku-wish { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px dashed #e6e0d2; }
+.sku-wish > b { font-size: 13px; }
+.sku-wish p { margin: 0; padding: 8px 10px; border-radius: 8px; background: #f7f4ec; font-size: 13px; }
+.sku-wish small { font-size: 12px; color: #6b6455; }
+.sku-scroll { overflow-x: auto; }
+.sku-table { font-size: 13px; }
+.sku-tr { display: grid; grid-template-columns: 70px 110px 150px 130px minmax(0, 1fr) 44px; gap: 0 10px; align-items: center; min-width: 640px; padding: 8px; border-radius: 8px; }
+.sku-table.no-why .sku-tr { grid-template-columns: 70px 110px 150px minmax(0, 1fr) 44px; min-width: 520px; }
+.sku-tr.head { padding: 6px 8px; color: #6b6455; font-size: 12px; font-weight: 700; }
+.sku-tr.on { background: #eef4ff; }
+.sku-tr .r { text-align: right; }
+.sku-tr .q { color: #4b5466; }
+.sku-tr button { font: inherit; font-weight: 800; color: #243f73; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+.sku-meta { margin: 0; font-size: 12px; color: #6b6455; }
+.sku-tl ol { list-style: none; margin: 8px 0 0; padding: 0 0 0 14px; border-left: 3px solid #dbe4f3; display: flex; flex-direction: column; gap: 8px; }
+.sku-tl li { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px; font-size: 13px; }
+.sku-tl li > span:first-child, .sku-tl small { color: #6b6455; font-variant-numeric: tabular-nums; }
+.sku-tl b.key { color: #0f766e; }
+.sku-tl b.stop { color: #9a4a0c; }
+.sku-note { margin: 0; padding: 10px 14px; border-radius: 10px; background: #efe9dc; font-size: 12px; color: #4b5466; line-height: 1.7; }
+
+/* 이용자 보기 — 현황 버튼 (요약 블록 없음 · 팝업만) */
+.status-sum .ss-su-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: 0 0 auto; border-radius: 999px; padding: 6px 12px;
+    font: inherit; font-size: 12px; font-weight: 800; white-space: nowrap;
+    cursor: pointer; box-shadow: 0 1px 0 rgba(31, 38, 51, .06);
+    background: #f5f8ff; color: #2f6fed; border: 1px solid #b4c7e6;
+}
+.status-sum .ss-su-btn:hover:not(:disabled) {
+    background: #e8effc; color: #1f5ad4; border-color: #9bb6e4;
+}
+.status-sum .ss-su-btn:disabled { opacity: .55; cursor: wait; }
+.su-mount { display: inline-flex; align-items: center; margin-left: 8px; }

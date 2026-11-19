@@ -62,6 +62,7 @@ class Site:
     blurb: str = ""
     order: int = 100                     # sort within an office (from hq.order)
     youtube: dict = field(default_factory=dict)  # hq.youtube — design team attach queue
+    visitlog: bool = False  # hq.visitlog — first-party visitor flow for HQ「이용자 보기」
 
     @property
     def repo(self) -> Path:
@@ -204,6 +205,7 @@ def _site_from_svc(svc: dict[str, Any]) -> Site | None:
         blurb=str(hq.get("blurb") or ""),
         order=int(hq.get("order") or 100),
         youtube=dict(yt),
+        visitlog=bool(hq.get("visitlog", False)),
     )
 
 
