@@ -526,6 +526,18 @@ def site_users_card():
     return _site_users_html()
 
 
+@app.get("/site/<site>/urls")
+def site_url_stats():
+    """📋 URL별 숫자 (이용자 보기 dialog의 탭): GA4 조회·사용자·세션 + GSC 클릭·노출·CTR·순위."""
+    from app import url_stats
+    try:
+        days = int(request.args.get("days") or 7)
+    except ValueError:
+        days = 7
+    s = url_stats.fetch(sites.current_id(), days, fresh=request.args.get("fresh") == "1")
+    return render_template("_url_stats.html", s=s)
+
+
 @app.get("/site/<site>/sitekpi-users")
 def site_sitekpi_users():
     """옛 URL → 같은 이용자 dialog."""

@@ -101,7 +101,7 @@ content 타입별 쓰기·리서치·slug·레이아웃. UI seed/topics는 kit�
 | 마케 | `search` · `search/analyze` · `search/clear` · `polish` · `analysis/{aid}.md` · `analytics/card` |
 | 디자인 | `images` · `images/covers` · `logos` · `places` · `candidates` · `candidate` · `pick` · `redraw` · `sync` · `cleanup` · `file/{name}` · `youtube`(→`images#youtube`) · `youtube/api/…` |
 | 개발 | `ship` · `ship/issue` · `review` · `fix` · `push` · `merge` · `refactor` · `auto` |
-| 이용자 | `/site/{id}/users` · `/site/{id}/sitekpi-users`(별칭) |
+| 이용자 | `/site/{id}/users` · `/site/{id}/sitekpi-users`(별칭) · `/site/{id}/urls`(URL별 숫자) |
 | 카드·도구 | `costs` · `costs/limits` · `affiliate(/{what})` · `tools/check` · `tools/claude-login` · `tools/restart` · `run/{task}` · `action/{aid}` · `panel/{team}` |
 
 - 사이트 라우트는 `/site/{id}/…`. `_OPEN_BEFORE_CONNECT = {site_status, site_costs_card, site_affiliate_card}`
@@ -190,6 +190,7 @@ content 타입별 쓰기·리서치·slug·레이아웃. UI seed/topics는 kit�
   - 그 외 → `ga4_users` (GA4 「많이 본 페이지 · 활성 사용자 순」 폴백)
 - 사이트 쪽: `POST /events` 수집 + `GET /hq/api/users`. 공유 키트 `/opt/work/_shared/visitkit/`를 각 사이트 repo에 vendor (`visitkit/` · `visit_track.js`)
 - visitlog live (2026-11-19): okpy · jpcampus · krcampus · companydb · okcaddie · okonsen · okramen · jpfun · krcare (9곳 전부). `hq.visitlog`가 없는 사이트만 GA4 폴백
+- 「URL별 숫자」 탭: `GET /site/{id}/urls?days=7|30|90[&fresh=1]` → `_url_stats.html`. `app/url_stats.py`가 GA4 `fetch_ga4_pages`(조회·사용자·세션) + GSC `fetch_gsc_pages`(클릭·노출·CTR·순위, 노출 상위 500 URL)를 경로(쿼리·끝 `/` 제외)로 합침. 조회수순 최대 500행 · 열 머리 눌러 정렬 · URL 찾기. 캐시 5분. 테스트 `tests/test_url_stats.py`
 - 화면: `_site_users.html` · `static/sitekpi_users.css`. 테스트 `tests/test_site_users.py` · `tests/test_sitekpi_users.py` · `tests/test_visitkit_summarize.py`
 
 ## 12. 사장 로그인 · 도구

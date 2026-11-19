@@ -7,15 +7,26 @@
     <dialog class="sku-dlg su-dlg" id="su-dlg" aria-labelledby="su-h">
         <div class="sku-top">
             <h2 id="su-h">👥 {{ u.title or '이용자' }}</h2>
+            <nav class="su-tabs" aria-label="보기">
+                <button type="button" data-su-tab="users" aria-pressed="true">이용자</button>
+                <button type="button" data-su-tab="urls" aria-pressed="false">URL별 숫자</button>
+            </nav>
             <span class="sku-gap"></span>
             <button type="button" class="sku-x" data-su-close aria-label="닫기">×</button>
         </div>
-        <div class="sku-main"><p class="hint warn">{{ u.error }}</p></div>
+        <div class="sku-main" data-su-pane="users"><p class="hint warn">{{ u.error }}</p></div>
+        <div class="sku-main" data-su-pane="urls" hidden>
+            <div id="su-urls" data-url="{{ url_for('site_url_stats') }}"><p class="hint">URL 탭을 누르면 불러와요.</p></div>
+        </div>
     </dialog>
     {% else %}
     <dialog class="sku-dlg su-dlg" id="su-dlg" aria-labelledby="su-h">
         <div class="sku-top">
             <h2 id="su-h">👥 {{ u.title or '이용자' }}</h2>
+            <nav class="su-tabs" aria-label="보기">
+                <button type="button" data-su-tab="users" aria-pressed="true">이용자</button>
+                <button type="button" data-su-tab="urls" aria-pressed="false">URL별 숫자</button>
+            </nav>
             <span class="sku-sub">{{ u.subtitle }} · {{ u.generated_at }} 기준{% if u.cached %} · 캐시{% endif %}</span>
             <span class="sku-gap"></span>
             <nav class="sku-period" aria-label="기간">
@@ -24,7 +35,7 @@
             </nav>
             <button type="button" class="sku-x" data-su-close aria-label="닫기">×</button>
         </div>
-        <div class="sku-main">
+        <div class="sku-main" data-su-pane="users">
             <section class="sku-kpis" aria-label="요약">
                 {% for x in k %}<div class="sku-kpi"><span>{{ x.label }}</span><b>{{ x.value }}<small> {{ x.unit }}</small></b><em>{{ x.note }}</em></div>{% endfor %}
             </section>
@@ -93,6 +104,9 @@
             {% endif %}
             {% if u.note %}<p class="sku-note">{{ u.note }}</p>
             {% elif survey_on %}<p class="sku-note">남기는 것: 익명 방문자 ID(브라우저 쿠키) · 화면 · 누른 버튼 · 시각 · 언어 · 들어온 곳(도메인만) · 설문 답. 남기지 않는 것: IP · Google 계정 · 이용자 GA4의 숫자·속성 이름. {{ u.keep_days or 90 }}일이 지나면 자동 삭제.</p>{% endif %}
+        </div>
+        <div class="sku-main" data-su-pane="urls" hidden>
+            <div id="su-urls" data-url="{{ url_for('site_url_stats') }}"><p class="hint">URL 탭을 누르면 불러와요.</p></div>
         </div>
     </dialog>
     {% endif %}

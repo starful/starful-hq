@@ -890,6 +890,50 @@
 (function () {
     // 👥 이용자 보기: ss-actions 버튼만. 클릭 시 로드 → dialog (SiteKPI=로그+설문, 나머지=GA4).
     let suBusy = false;
+    let suTab = "users", suFresh = false;
+    // 📋 URL별 숫자 탭: 처음 열 때만 읽음 · 기간이 바뀌면 다시
+    function urlsLoad(fresh) {
+        const box = document.getElementById("su-urls");
+        const card = document.getElementById("su-card");
+        if (!box || !card) return;
+        const days = card.dataset.days || "7";
+        if (!fresh && box.dataset.days === days) return;
+        box.dataset.days = days;
+        box.innerHTML = '<p class="hint">URL별 숫자 읽는 중…</p>';
+        fetch(box.dataset.url + "?days=" + days + (fresh ? "&fresh=1" : ""))
+            .then((r) => r.text())
+            .then((html) => { box.innerHTML = html; })
+            .catch(() => { box.innerHTML = '<p class="hint warn">불러오지 못했어요. 다시 눌러 보세요.</p>'; box.dataset.days = ""; });
+    }
+    function suShow(tab, fresh) {
+        suTab = tab;
+        document.querySelectorAll("#su-card [data-su-tab]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.suTab === tab ? "true" : "false"));
+        document.querySelectorAll("#su-card [data-su-pane]").forEach((p) => { p.hidden = p.dataset.suPane !== tab; });
+        if (tab === "urls") urlsLoad(fresh);
+    }
+    function urlsSort(btn) {
+        const table = btn.closest("[data-su-table]");
+        if (!table) return;
+        const key = btn.dataset.suSort, text = btn.dataset.type === "text";
+        const was = btn.getAttribute("aria-sort");
+        const asc = was ? was === "descending" : (text || btn.dataset.asc === "1");
+        table.querySelectorAll("[data-su-sort]").forEach((b) => b.removeAttribute("aria-sort"));
+        btn.setAttribute("aria-sort", asc ? "ascending" : "descending");
+        const body = table.tBodies[0];
+        const rows = Array.from(body.querySelectorAll("tr[data-path]"));
+        rows.sort((a, b) => {
+            const x = a.dataset[key], y = b.dataset[key];
+            const c = text ? x.localeCompare(y) : (parseFloat(x) - parseFloat(y));
+            return asc ? c : -c;
+        });
+        rows.forEach((r) => body.appendChild(r));
+    }
+    document.addEventListener("input", (ev) => {
+        const t = ev.target;
+        if (!(t instanceof Element) || !t.matches("[data-su-find]")) return;
+        const q = t.value.trim().toLowerCase();
+        document.querySelectorAll("#su-urls tr[data-path]").forEach((r) => { r.hidden = q && !r.dataset.path.toLowerCase().includes(q); });
+    });
     function suLoad(url, reopen) {
         const card = document.getElementById("su-card");
         if (!card || suBusy) return;
@@ -907,6 +951,8 @@
             document.getElementById("su-card").replaceWith(next);
             const dlg = document.getElementById("su-dlg");
             if (reopen && dlg && dlg.showModal) dlg.showModal();
+            if (suTab === "urls") suShow("urls", suFresh);
+            suFresh = false;
         }).catch(() => {
             if (btn) { btn.disabled = false; btn.textContent = label; }
             alert("불러오지 못했어요. 다시 눌러 보세요.");
@@ -926,8 +972,13 @@
         if (!card && t !== dlg) return;
         if (t.closest("[data-su-close]") && dlg) { dlg.close(); return; }
         if (t === dlg) { dlg.close(); return; }
+        const tab = t.closest("[data-su-tab]");
+        if (tab) { suShow(tab.dataset.suTab); return; }
+        const so = t.closest("[data-su-sort]");
+        if (so) { urlsSort(so); return; }
         const d = t.closest("[data-su-days]");
         if (d) {
+            suFresh = d.hasAttribute("data-su-fresh");
             const base = document.getElementById("su-card").dataset.url;
             suLoad(base + "?days=" + d.dataset.suDays + (d.hasAttribute("data-su-fresh") ? "&fresh=1" : ""), true);
             return;
