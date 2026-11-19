@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ cur_site.label }} · {{ cur_office.name }} — Starful HQ</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='sitekpi_users.css') }}">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='hq-icon.svg') }}">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='hq-icon-32.png') }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='hq-icon-180.png') }}">
@@ -164,6 +165,9 @@
                     <form method="post" action="{{ url_for('site_checked') }}" class="inline-form"><button class="act ghost small" type="submit">✓ 확인했어요</button></form>
                 </span>
                 {% endif %}
+                <span class="su-mount" id="su-card" data-url="{{ url_for('site_users_card') }}">
+                    <button type="button" class="ss-su-btn" data-su-open>{% if cur_site.id == 'sitekpi' %}이용자 · 설문 보기{% else %}이용자 보기{% endif %}</button>
+                </span>
             </p>
         </div>
 
@@ -882,6 +886,59 @@
             else setTimeout(go, 0);
         }
     }
+})();
+(function () {
+    // 👥 이용자 보기: ss-actions 버튼만. 클릭 시 로드 → dialog (SiteKPI=로그+설문, 나머지=GA4).
+    let suBusy = false;
+    function suLoad(url, reopen) {
+        const card = document.getElementById("su-card");
+        if (!card || suBusy) return;
+        suBusy = true;
+        const btn = card.querySelector("[data-su-open]");
+        const label = btn ? btn.textContent : "이용자 보기";
+        if (btn) { btn.disabled = true; btn.textContent = "읽는 중…"; }
+        fetch(url).then((r) => r.text()).then((html) => {
+            const box = document.createElement("div");
+            box.innerHTML = html.trim();
+            const next = box.querySelector("#su-card");
+            if (!next) return;
+            const old = document.getElementById("su-dlg");
+            if (old && old.open) old.close();
+            document.getElementById("su-card").replaceWith(next);
+            const dlg = document.getElementById("su-dlg");
+            if (reopen && dlg && dlg.showModal) dlg.showModal();
+        }).catch(() => {
+            if (btn) { btn.disabled = false; btn.textContent = label; }
+            alert("불러오지 못했어요. 다시 눌러 보세요.");
+        }).finally(() => { suBusy = false; });
+    }
+    document.addEventListener("click", (ev) => {
+        const t = ev.target;
+        if (!(t instanceof Element)) return;
+        const card = t.closest("#su-card");
+        const dlg = document.getElementById("su-dlg");
+        if (t.closest("[data-su-open]")) {
+            if (dlg && card && card.dataset.loaded) { dlg.showModal(); return; }
+            const mount = document.getElementById("su-card");
+            if (mount) suLoad(mount.dataset.url, true);
+            return;
+        }
+        if (!card && t !== dlg) return;
+        if (t.closest("[data-su-close]") && dlg) { dlg.close(); return; }
+        if (t === dlg) { dlg.close(); return; }
+        const d = t.closest("[data-su-days]");
+        if (d) {
+            const base = document.getElementById("su-card").dataset.url;
+            suLoad(base + "?days=" + d.dataset.suDays + (d.hasAttribute("data-su-fresh") ? "&fresh=1" : ""), true);
+            return;
+        }
+        const p = t.closest("[data-su-pick]");
+        if (p) {
+            const i = p.dataset.suPick;
+            document.querySelectorAll("#su-card [data-su-v]").forEach((r) => r.classList.toggle("on", r.dataset.suV === i));
+            document.querySelectorAll("#su-card [data-su-tl]").forEach((x) => { x.hidden = x.dataset.suTl !== i; });
+        }
+    });
 })();
 (function () {
     // 한눈에: 콘텐츠 숫자 · 대기/멈춤 큐 팝업 (+ 지금 시작)

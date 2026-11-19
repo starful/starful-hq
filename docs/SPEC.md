@@ -45,6 +45,7 @@ starful-hq/
   - `enabled: false` = 소프트 끔, `hq:` 삭제 = HQ에서 뺌
   - `content: ""` = 글쓰기 없음 (CONTENT_TASKS 불가)
   - `youtube: {enabled, noun, page_prefix, query}` = 디자인 탭 YouTube 모드
+  - `visitlog: true` = 이용자 보기에서 사이트 자체 방문 로그(visitkit) 사용. 없으면 GA4 폴백
 - 정렬: `_load_hq` 키 `(floor < 1, floor, id)` → 위층 먼저, 그다음 지하
 - `sites.py`에 사이트 목록을 하드코드하지 않음. 테스트 `tests/test_sites.py`
 
@@ -100,6 +101,7 @@ content 타입별 쓰기·리서치·slug·레이아웃. UI seed/topics는 kit�
 | 마케 | `search` · `search/analyze` · `search/clear` · `polish` · `analysis/{aid}.md` · `analytics/card` |
 | 디자인 | `images` · `images/covers` · `logos` · `places` · `candidates` · `candidate` · `pick` · `redraw` · `sync` · `cleanup` · `file/{name}` · `youtube`(→`images#youtube`) · `youtube/api/…` |
 | 개발 | `ship` · `ship/issue` · `review` · `fix` · `push` · `merge` · `refactor` · `auto` |
+| 이용자 | `/site/{id}/users` · `/site/{id}/sitekpi-users`(별칭) |
 | 카드·도구 | `costs` · `costs/limits` · `affiliate(/{what})` · `tools/check` · `tools/claude-login` · `tools/restart` · `run/{task}` · `action/{aid}` · `panel/{team}` |
 
 - 사이트 라우트는 `/site/{id}/…`. `_OPEN_BEFORE_CONNECT = {site_status, site_costs_card, site_affiliate_card}`
@@ -178,6 +180,17 @@ content 타입별 쓰기·리서치·slug·레이아웃. UI seed/topics는 kit�
 - `affsync`: 브라우저 프로필로 楽天·Agoda·Amazon 대시보드를 몇 시간마다 읽음 (A8 중단)
 - `usage`: `/usage/track` → `data/hq_usage.json`
 - CSS: `admin.css` 끝 「어필리 · 비용 v2」 블록 (`.mp-top` · `.mp-hero` · `.mp-meter` · `.mp-bar`)
+
+## 11-1. 이용자 보기 (visitlog · GA4)
+
+- 「현황」 회의 결과 줄의 **이용자 보기** 버튼 (SiteKPI는 **이용자 · 설문 보기**). 요약 블록 없음 · 클릭 시 `GET /site/{id}/users?days=7|30|90[&fresh=1]` → dialog (`/sitekpi-users`는 별칭)
+- `app/site_users.py`가 출처를 고름:
+  - SiteKPI → `sitekpi_users` (자체 로그 + 설문)
+  - `hq.visitlog: true` → `visitlog_users`가 `https://{domain}/hq/api/users`를 Bearer로 읽음. 토큰 = HMAC(`VISITLOG_SECRET`, `visitlog-hq-api-v1:{site}`), 비밀값은 Secret Manager `VISITLOG_SECRET`. 방문자 표 → 오른쪽에 방문 흐름 (설문 없음)
+  - 그 외 → `ga4_users` (GA4 「많이 본 페이지 · 활성 사용자 순」 폴백)
+- 사이트 쪽: `POST /events` 수집 + `GET /hq/api/users`. 공유 키트 `/opt/work/_shared/visitkit/`를 각 사이트 repo에 vendor (`visitkit/` · `visit_track.js`)
+- visitlog live (2026-11-19): okpy · jpcampus · krcampus · companydb · okcaddie · okonsen · okramen · jpfun. krcare는 GA4 폴백
+- 화면: `_site_users.html` · `static/sitekpi_users.css`. 테스트 `tests/test_site_users.py` · `tests/test_sitekpi_users.py` · `tests/test_visitkit_summarize.py`
 
 ## 12. 사장 로그인 · 도구
 

@@ -509,6 +509,28 @@ def site_analytics_card():
         }
     return render_template("_analytics_card.html", traffic=traffic)
 
+
+def _site_users_html():
+    from app import site_users as su
+    try:
+        days = int(request.args.get("days") or 7)
+    except ValueError:
+        days = 7
+    u = su.fetch(sites.current_id(), days, fresh=request.args.get("fresh") == "1")
+    return render_template("_site_users.html", u=u)
+
+
+@app.get("/site/<site>/users")
+def site_users_card():
+    """👥 이용자 보기 (현황 버튼 → dialog). SiteKPI=visitlog+설문, visitlog 사이트=방문 흐름, 나머지=GA4."""
+    return _site_users_html()
+
+
+@app.get("/site/<site>/sitekpi-users")
+def site_sitekpi_users():
+    """옛 URL → 같은 이용자 dialog."""
+    return _site_users_html()
+
 @app.post("/refresh")
 def refresh():
     jobs.refresh_snapshot()
