@@ -130,3 +130,11 @@ def test_double_tail_from_real_okonsen_titles():
     assert t["/guide/guide_expand_008_en"] == "Japan Konbini Guide: Food, ATMs, Wi-Fi & Travel Tips"
     assert t["/onsen/kasho"] == "Jozankei Onsen Kasho Gyoen: Riverside Ryokan Near Sapporo"
     assert t["/g1"] == "Guide 1"
+
+
+def test_site_name_guide_tail():
+    t = url_stats.page_titles([
+        {"page": "/a", "title": "Seoul vs Busan for Plastic Surgery in Korea - KR Care Guide", "views": 1},
+        {"page": "/b", "title": "Clinic Guide for Busan", "views": 1},
+    ], ("KR Care", "krcare"))
+    assert t == {"/a": "Seoul vs Busan for Plastic Surgery in Korea", "/b": "Clinic Guide for Busan"}
