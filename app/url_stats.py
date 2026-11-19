@@ -6,6 +6,7 @@ GA4 pagePath와 GSC page URL은 경로(쿼리·끝 / 제외)로 맞춘다.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -34,6 +35,7 @@ def path_key(url: str) -> str:
 
 
 SEPS = (" | ", " - ", " — ", " – ", " · ")
+_TAIL = re.compile(r"\s*[|｜\-—–·]\s*([^|｜\-—–·]{1,40}?)\s*$")
 
 
 def _norm(x: str) -> str:
@@ -58,6 +60,10 @@ def _strip_suffix(titles: dict[str, str], names: tuple[str, ...] = ()) -> dict[s
     common |= {k for k in tails if _norm(k) in site_names}
     out = {}
     for p, t in titles.items():
+        m = _TAIL.search(t)
+        if m and site_names and _norm(m.group(1)) in site_names and t[: m.start()].strip():
+            out[p] = t[: m.start()].strip()   # 「…】— OKPy」 · 「…｜KR Campus」: site name after any dash/bar
+            continue
         for sep in SEPS:
             if sep in t and t.rsplit(sep, 1)[1].strip().lower() in common:
                 head = t.rsplit(sep, 1)[0].strip()
