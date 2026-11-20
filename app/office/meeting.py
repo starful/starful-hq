@@ -12,6 +12,7 @@ import json
 import threading
 import time
 import traceback
+from pathlib import Path
 from typing import Any
 
 from app.office import jobs
@@ -111,6 +112,60 @@ def _write_line(site_list: list[sites.Site]) -> str:
     return "- write: 새 글 쓰기 (사이트마다: " + " / ".join(lines) + "; 여기 없는 사이트는 write 대신 none)\n"
 
 
+EXISTING_CHARS = 30000   # all sites together; newest pages first when it runs out
+
+
+def existing_pages(site: sites.Site, limit: int = 2000) -> list[str]:
+    """What the site already has, as readable names (newest first): 「guides/jiro-ramen-ordering」 · 「afuri harajuku」.
+    Language copies (_en/_ko/_ja) count once."""
+    from app.content import contentkit
+    from app.content.poicontent import base_of
+    with sites.use(site.id):
+        root = Path(site.repo) / site.posts_rel
+        try:
+            paths = contentkit.list_posts(root, site.post_ext)
+        except Exception:  # noqa: BLE001 - a missing repo just means no list
+            return []
+    def mtime(p: Path) -> float:
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return 0.0
+    out: list[str] = []
+    seen: set[str] = set()
+    for p in sorted(paths, key=mtime, reverse=True):
+        name = base_of(p.stem)
+        if p.parent != root:
+            name = f"{p.parent.name}/{name}"
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _existing_block(site_list: list[sites.Site]) -> str:
+    """Prompt block: the pages each writable site already has, so write topics are new ones."""
+    writable = [s for s in site_list if s.can_write]
+    if not writable:
+        return ""
+    budget = max(3000, EXISTING_CHARS // len(writable))
+    lines = []
+    for s in writable:
+        names = existing_pages(s)
+        shown, used = [], 0
+        for n in names:
+            if used + len(n) + 2 > budget:
+                break
+            shown.append(n)
+            used += len(n) + 2
+        more = f" … 외 {len(names) - len(shown)}개(오래된 것)" if len(shown) < len(names) else ""
+        lines.append(f"- {s.id} ({len(names)}개): {', '.join(shown) or '없음'}{more}\n")
+    return ("이미 있는 글·페이지 (파일 이름, 최신순). write topics는 이 목록과 같거나 비슷한 주제면 안 된다. "
+            "같은 주제를 다른 말로 바꾼 것도 안 된다:\n" + "".join(lines) + "\n")
+
+
 def _ask_all(members: list[str], ctx: dict[str, Any], focus: str, ask: str, host: str,
              per_person: int = 1, topic: str = "", kind: str = "전사", site_list: list[sites.Site] | None = None) -> dict[str, Any]:
     """One Claude call: each person proposes from their position, then the leader ranks them.
@@ -153,9 +208,10 @@ def _ask_all(members: list[str], ctx: dict[str, Any], focus: str, ask: str, host
         '"action": {"type": "", "category": "", "topics": [], "area": "", "spec": ""}}], '
         '"ranking": ["우선순위대로 key"], "headline": "회의 결론 한 문장", "leader_note": "리더의 한마디"}\n'
         "title은 구체적 한 줄로 써라. '이름 제안'처럼 쓰지 마라.\n"
-        "write의 topics는 아직 없는 새 주제만. 이미 있는 글·비슷한 제목은 다시 제안하지 마라.\n"
+        "write의 topics는 아직 없는 새 주제만. 아래 「이미 있는 글·페이지」와 같거나 비슷한 주제는 다시 제안하지 마라.\n"
         "숫자를 지어내지 말고 없는 데이터는 '확인 필요'라고 써라.\n\n"
-        f"데이터: {json.dumps(ctx, ensure_ascii=False, default=str)[:14000]}\n"
+        + _existing_block(site_list if many else [site])
+        + f"데이터: {json.dumps(ctx, ensure_ascii=False, default=str)[:14000]}\n"
     )
     return claude_json(prompt, timeout_sec=600, model=MODEL_HEAVY) or {}
 
