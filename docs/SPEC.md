@@ -158,6 +158,7 @@ content 타입별 쓰기·리서치·slug·레이아웃. UI seed/topics는 kit�
 - `MODE_TASK` = meeting / meeting_leaders / meeting_boss / meeting_{team}. 주제 없으면 `TEAM_TOPIC`
 - Claude 1회 호출, 아이디어마다 action id (research · write · issue · search · polish · analyze · review · push · deploy · optimize · common · meeting · leaders · summon)
 - `FOCUS`: all · money · feature · content · growth
+- 이미 있는 글: `existing_pages(site)` = posts 파일 이름(언어 `_en/_ko/_ja` 1개로, `guides/` 등 폴더 붙임, 최신순). `_existing_block`이 글을 쓸 수 있는 사이트마다 프롬프트에 넣음 (`데이터:` 14000자 자르기와 별도, 전체 `EXISTING_CHARS = 30000`, 사이트당 최소 3000자, 넘치면 오래된 것부터 뺌). write topics는 이 목록과 같거나 비슷하면 안 됨
 - 저장: `planning.save` → `data/proposals/`
 
 ## 10. 마케팅 · 이미지 · YouTube

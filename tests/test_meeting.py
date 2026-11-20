@@ -228,3 +228,34 @@ def test_affiliate_summary_reads_okadmin_numbers(tmp_path, monkeypatch):
     assert rak["commission"] == "¥1,875" and rak["prev"] == "¥3,228" and rak["prev_clicks"] == 3055
     assert s["total"] == "¥1,875" and s["orders"] == 3 and s["updated"] == "2026-10-19 14:25"
     assert next(r for r in s["rows"] if r["id"] == "agoda")["commission"] == "$0.00"
+
+
+def test_meeting_prompt_lists_existing_pages(tmp_path, monkeypatch):
+    """전사 회의 knows what is already written: write topics must be new (jiro-ramen-ordering 중복)."""
+    import os
+    from app import sites
+    from app.office import meeting
+
+    site = sites.SITES["okramen"]
+    root = tmp_path / "okramen" / site.posts_rel
+    (root / "guides").mkdir(parents=True)
+    for i, name in enumerate(["afuri_harajuku_en.md", "afuri_harajuku_ko.md", "guides/jiro-ramen-ordering_en.md",
+                              "guides/jiro-ramen-ordering_ko.md"]):
+        (root / name).write_text("x")
+        os.utime(root / name, (1000 + i, 1000 + i))
+    monkeypatch.setattr(type(site), "repo", property(lambda self: tmp_path / self.id))
+
+    names = meeting.existing_pages(site)
+    assert names == ["guides/jiro-ramen-ordering", "afuri_harajuku"]
+
+    block = meeting._existing_block([site])
+    assert "okramen (2개)" in block and "guides/jiro-ramen-ordering" in block and "비슷한 주제" in block
+
+    seen = {}
+    import llm_claude
+    monkeypatch.setattr(llm_claude, "claude_json", lambda prompt, **kw: seen.setdefault("p", prompt) and {})
+    with sites.use("okramen"):
+        meeting._ask_all([meeting.office.LEADERS[0]], {"posts": {"total": 2}}, "all", "",
+                         meeting.office.LEADERS[0])
+    assert "guides/jiro-ramen-ordering" in seen["p"]
+    assert seen["p"].index("이미 있는 글·페이지") < seen["p"].index("데이터:")
