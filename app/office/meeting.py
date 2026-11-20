@@ -166,6 +166,16 @@ def _existing_block(site_list: list[sites.Site]) -> str:
             "같은 주제를 다른 말로 바꾼 것도 안 된다:\n" + "".join(lines) + "\n")
 
 
+def _brief_block(site_list: list[sites.Site]) -> str:
+    """Prompt block: each site's plan (기획서), page numbers and recent meeting results. Never breaks a meeting."""
+    from app.office import site_brief
+    try:
+        return site_brief.block(site_list)
+    except Exception:  # noqa: BLE001 - a meeting still runs without the briefing
+        traceback.print_exc()
+        return ""
+
+
 def _ask_all(members: list[str], ctx: dict[str, Any], focus: str, ask: str, host: str,
              per_person: int = 1, topic: str = "", kind: str = "전사", site_list: list[sites.Site] | None = None) -> dict[str, Any]:
     """One Claude call: each person proposes from their position, then the leader ranks them.
@@ -211,6 +221,7 @@ def _ask_all(members: list[str], ctx: dict[str, Any], focus: str, ask: str, host
         "write의 topics는 아직 없는 새 주제만. 아래 「이미 있는 글·페이지」와 같거나 비슷한 주제는 다시 제안하지 마라.\n"
         "숫자를 지어내지 말고 없는 데이터는 '확인 필요'라고 써라.\n\n"
         + _existing_block(site_list if many else [site])
+        + _brief_block(site_list if many else [site])
         + f"데이터: {json.dumps(ctx, ensure_ascii=False, default=str)[:14000]}\n"
     )
     return claude_json(prompt, timeout_sec=600, model=MODEL_HEAVY) or {}

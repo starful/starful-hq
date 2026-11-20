@@ -160,6 +160,12 @@ content 타입별 쓰기·리서치·slug·레이아웃. UI seed/topics는 kit�
 - `FOCUS`: all · money · feature · content · growth
 - 이미 있는 글: `existing_pages(site)` = posts 파일 이름(언어 `_en/_ko/_ja` 1개로, `guides/` 등 폴더 붙임, 최신순). `_existing_block`이 글을 쓸 수 있는 사이트마다 프롬프트에 넣음 (`데이터:` 14000자 자르기와 별도, 전체 `EXISTING_CHARS = 30000`, 사이트당 최소 3000자, 넘치면 오래된 것부터 뺌). write topics는 이 목록과 같거나 비슷하면 안 됨
 - 저장: `planning.save` → `data/proposals/`
+- 사이트 브리핑 (`app/office/site_brief.py`, `_brief_block`): `_existing_block` 다음에 사이트마다 3개 블록. 하나라도 못 읽으면 그 블록만 빠지고, 브리핑 전체가 실패해도 회의는 그대로 진행
+  - 기획서: Google Drive 동기화 폴더 `HQ_PLAN_DIR`(기본 `~/Library/CloudStorage/GoogleDrive-starful0418@gmail.com/내 드라이브/AI`)의 `<site id>/<site id> 기획서.html` (없으면 `<label>/<label> 기획서.html`). script·style·iframe(화면 설계)·nav를 빼고 블록마다 한 줄, 표는 `|`로. 사이트당 `PLAN_CHARS = 8000`자
+  - 페이지별 성적: `url_stats.fetch(site_id, 30)` → 조회수 상위 10 + 노출 많고 CTR 낮은 10 (노출 `LOW_CTR_MIN_IMPRESSIONS = 50` 이상, 사이트 평균 CTR 미만, 노출 많은 순). 제목·경로·조회·클릭·노출·CTR·순위. 실패하면 생략
+  - 최근 회의 결정과 결과: `planning.history` 중 최근 `RECENT_DAYS = 14`일 회의의 이 사이트 제안 + 실행 큐(`workqueue.list_items`, `pid`·`idx`로 연결) 상태(대기·실행 중·완료·실패·보류)와 실패·보류 이유. 회의 밖 실패 항목도 포함. 사이트당 `RECENT_MAX = 15`줄
+  - 프롬프트 규칙: 이미 실패했거나 「이미 있는」 이유로 막힌 제안은 다시 내지 않음 · 노출 많고 CTR 낮은 페이지는 search 후보
+  - 사이트 여러 개(전사 회의)는 병렬로 읽음 (최대 4). 테스트 `tests/test_site_brief.py`
 
 ## 10. 마케팅 · 이미지 · YouTube
 
