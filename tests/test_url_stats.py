@@ -138,3 +138,10 @@ def test_site_name_guide_tail():
         {"page": "/b", "title": "Clinic Guide for Busan", "views": 1},
     ], ("KR Care", "krcare"))
     assert t == {"/a": "Seoul vs Busan for Plastic Surgery in Korea", "/b": "Clinic Guide for Busan"}
+
+
+def test_no_empty_detail_bar():
+    """「상세 · 펼치기 →」 bar only where the tab has a detail panel."""
+    from pathlib import Path
+    html = (Path(__file__).resolve().parents[1] / "app/templates/site.html").read_text()
+    assert '{% if tab not in ("status", "meet") and step in details %}\n    <div class="detail-list" id="detail-reopen"' in html

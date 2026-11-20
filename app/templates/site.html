@@ -189,7 +189,7 @@
         "ship": ("개발팀 상세", "반영 상태 · 최적화 · 공통화"),
     } %}
     {% set step_url = {"write": url_for('site_write'), "search": url_for('site_search'), "images": url_for('site_images'), "ship": url_for('site_ship')} %}
-    {% if tab not in ("status", "meet") %}
+    {% if tab not in ("status", "meet") and step in details %}
     <div class="detail-list" id="detail-reopen" hidden>
         <button type="button" class="detail-btn tone-{{ tab }}" data-open-drawer data-track="ui:drawer"><b>{{ details[step][0] if step in details else "상세" }}</b><span>{{ details[step][1] if step in details else "" }}</span><i>펼치기 →</i></button>
     </div>
