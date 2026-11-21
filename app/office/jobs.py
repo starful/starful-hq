@@ -40,6 +40,22 @@ def _set(role: str, **kw: Any) -> None:
         JOBS.setdefault(role, {"running": False, "kind": role, "line": "", "state": ""}).update(kw)
 
 
+def _bubble_err(exc: BaseException) -> str:
+    """One Korean line for the office bubble — never show raw ```json fences."""
+    raw = str(exc or "").strip() or "알 수 없는 오류"
+    low = raw.lower()
+    first = raw.splitlines()[0].strip() if raw else ""
+    if "session limit" in low or "usage limit" in low or "rate limit" in low:
+        return "Claude 사용 한도에 걸렸어요. 잠시 뒤에 다시 맡겨 주세요"
+    if "returned no json" in low or "no json" in low:
+        return "Claude가 JSON을 주지 않았어요. 다시 맡겨 주세요"
+    if first.startswith("```") or first in ("json", "{", "["):
+        return "Claude 응답을 읽지 못했어요. 다시 맡겨 주세요"
+    if "not logged in" in low and "claude" in low:
+        return "Claude CLI 로그인이 필요해요"
+    return first[:200]
+
+
 class Work:
     """Handle passed to a worker: say(line) updates the bubble and the feed line."""
 
@@ -141,19 +157,39 @@ def start(role: str, start_line: str, target: Callable[..., str], *args: Any,
             done = target(work, *args, **kwargs) or "끝났어요"
             _set(role, running=False, line=done, state="done")
             work.event(done, state="done")
+            try:
+                from app.work import handoff
+                handoff.clear()
+            except Exception as hand_exc:  # noqa: BLE001
+                print(f"handoff clear failed: {hand_exc}")
         except Exception as exc:  # noqa: BLE001 - surface any failure on the bubble
             traceback.print_exc()
-            msg = f"못 했어요. {str(exc)[:200]}"
+            from app import tools as tools_mod
+            if tools_mod.is_claude_limit_error(exc):
+                try:
+                    tools_mod.halt_claude_limit(str(exc))
+                except Exception as halt_exc:  # noqa: BLE001
+                    print(f"claude halt failed: {halt_exc}")
+            msg = f"못 했어요. {_bubble_err(exc)}"
             _set(role, running=False, line=msg, state="wait")
             work.event(msg, state="wait")
+            try:   # leave a note in the site repo so no other tool ships the leftovers blind
+                from app.work import handoff
+                handoff.write(msg, task=_task, who=role)
+            except Exception as hand_exc:  # noqa: BLE001
+                print(f"handoff note failed: {hand_exc}")
         finally:
             refresh_snapshot()
-            if not _task.startswith("meeting"):
-                try:   # 자동 진행: changes → PR → review → merge → deploy
-                    from app.work import autoship
-                    autoship.kick(site)
-                except Exception as exc:  # noqa: BLE001
-                    print(f"autoship kick failed: {exc}")
+            from app import tools as tools_mod
+            claude_halted = tools_mod.claude_halt_info() is not None or tools_mod.claude_blocked()[0]
+            if not _task.startswith("meeting") and not claude_halted:
+                # CompanyDB 회사 찾기(queue)는 universe_extra만 바꿈 → 페이지 빌드 전이라 PR autoship 안 탐.
+                if _task != "queue":
+                    try:   # 자동 진행: changes → PR → review → merge → deploy
+                        from app.work import autoship
+                        autoship.kick(site)
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"autoship kick failed: {exc}")
                 try:   # 실행 큐: 다음 대기 건
                     from app.work import workqueue
                     workqueue.kick(site)
@@ -175,8 +211,10 @@ def at_capacity() -> bool:
 
 
 def free_members(team: tuple[str, ...] | list[str]) -> list[str]:
+    from app.office import schedule
     with _LOCK:
-        return [r for r in team if not (JOBS.get(r) or {}).get("running")]
+        return [r for r in team
+                if not (JOBS.get(r) or {}).get("running") and not schedule.on_vacation(r)]
 
 
 def start_team(
@@ -219,7 +257,7 @@ def start_team(
 
 
 WIP_TASKS = ("issue", "push", "deploy", "optimize", "refactor", "refactor_front", "refactor_back")   # wait for the owner's uncommitted work
-CONTENT_TASKS = ("research", "write", "images")   # need the site's own post generator (okpy only for now)
+CONTENT_TASKS = ("research", "write", "queue", "images")   # need the site's own post generator (okpy only for now)
 
 
 def reset_request() -> None:
@@ -261,16 +299,33 @@ def start_task(task: str, start_line: str, target: Callable[..., str], *args: An
     if task == "polish" and not sites.current().can_polish:
         _refused("이 사이트 페이지는 다듬지 않아요")
         return None   # company pages are built from filings, not written: nothing to polish
+    if task == "research" and not sites.current().can_research:
+        _refused("CompanyDB는 키워드 리서치 없이 대기열·분석에서 회사를 추가해요")
+        return None
     if task in WIP_TASKS:
         from app import snapshot
         if snapshot.owner_wip():
             _refused("사장님이 커밋하지 않은 파일이 있어서 기다려요 · 커밋하거나 정리한 뒤 다시 맡겨 주세요")
             return None   # the owner's uncommitted files would end up in the PR / on the live site: wait
+    from app.office import schedule
+    if schedule.enforce_hours() and not schedule.is_work_hours():
+        why = schedule.off_reason() or "근무 시간 외"
+        _refused(f"지금은 {why}라서 새 일을 안 맡아요 · 근무 시간에 다시 맡겨 주세요")
+        return None
     holder = busy_groups().get(office.task_group(task))
     if holder and holder != _from:  # a hand-off from the person doing it (fix → push → review) is fine
         _refused(_busy_why(holder, office.task_group(task)))
         return None
-    for person in office.ordered_members(task):
+    members = office.ordered_members(task)
+    if not members:
+        tip = (
+            f"task {task!r}에 배정된 사람이 없어요 · office.TASK_TEAM에 팀을 넣었는지 확인하세요"
+            if task not in office.TASK_TEAM
+            else f"{task} 담당 팀이 비어 있어요 · 휴가·스케줄을 확인하세요"
+        )
+        _refused(tip)
+        return None
+    for person in members:
         if start(person, start_line, target, *args, _task=task):
             with _LOCK:
                 taken = [j.get("seat") for r, j in JOBS.items() if r != person and j.get("running") and j.get("seat")]
@@ -291,6 +346,11 @@ def start_task_split(task: str, items: list, start_line: Callable[[int], str], t
         return []
     if task == "polish" and not sites.current().can_polish:
         _refused("이 사이트 페이지는 다듬지 않아요")
+        return []
+    from app.office import schedule
+    if schedule.enforce_hours() and not schedule.is_work_hours():
+        why = schedule.off_reason() or "근무 시간 외"
+        _refused(f"지금은 {why}라서 새 일을 안 맡아요 · 근무 시간에 다시 맡겨 주세요")
         return []
     started = start_team(office.ordered_members(task), items, start_line, target, *extra, task=task)
     if started:

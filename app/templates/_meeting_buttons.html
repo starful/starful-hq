@@ -1,11 +1,18 @@
-{# 회의 버튼. 전사·사장실은 선택(radio)하면 주제 칸이 열림. Needs: meet_on, free_*, boss_on, office_sites, cur_*, jobs, office. #}
+{# 회의 버튼. 전사·사장실은 선택(radio)하면 주제 칸이 열림. Needs: meet_on, free_*, boss_on, office_sites, cur_*, jobs, office, focus_opts. #}
 {% from "_chibi.html" import chibi %}
-{# 현황 탭 = 전체 회의 열기. 결과는 회의 탭. 팀 회의는 각 팀 탭. #}
+{# 현황 탭 = 전체 회의 열기. 결과는 회의 탭. 팀 회의는 각 팀 탭. B1 TF = 주제 칩 · TF 사원만 (리더·사장실 없음). #}
+{% set tf = cur_office.id == "basement" %}
+{% if tf %}
+{% set meets = [
+    ("all", "👥", "TF 스탠드업", cur_office.name ~ " · TF 4명 · 주제별", free_people | length, 2, True),
+] %}
+{% else %}
 {% set meets = [
     ("all", "👥", "전사 회의", cur_office.name ~ " 사이트 전부 · 쉬는 사람", free_people | length, 2, True),
     ("leaders", "🧑‍💼", "리더 회의", "회의실 B · 리더 4명", free_leaders | length, 2, False),
     ("boss", "📣", "사장실 호출", "CEO · 리더 최대 5명", free_leaders | length, 1, True),
 ] %}
+{% endif %}
 <form method="post" action="{{ url_for('site_meeting') }}" class="meet-block" id="meet-block">
     <div class="meet-grid">
     {% for mode, icon, label, where, n, need, has_opts in meets %}
@@ -27,13 +34,22 @@
     </div>
 
     <div class="meet-opts" data-opts="all">
+        {% if tf and focus_opts %}
+        <fieldset class="meet-focus">
+            <legend>주제</legend>
+            {% for key, label in focus_opts.items() %}
+            <label class="meet-focus-opt"><input type="radio" name="focus" value="{{ key }}"{% if key == 'all' %} checked{% endif %} disabled> {{ label }}</label>
+            {% endfor %}
+        </fieldset>
+        {% endif %}
         <label class="meet-aside">
-            <span>전사 참고 주제 <small>(선택 · 메인은 오피스 전체)</small></span>
-            <input type="text" name="all_topic" placeholder="예: 어필리 전환, 저CTR 글…" maxlength="200" autocomplete="off" disabled>
+            <span>{% if tf %}참고 <small>(선택)</small>{% else %}전사 참고 주제 <small>(선택 · 메인은 오피스 전체)</small>{% endif %}</span>
+            <input type="text" name="all_topic" placeholder="{% if tf %}예: 월 결제 UX, GA4 첫 연결…{% else %}예: 어필리 전환, 저CTR 글…{% endif %}" maxlength="200" autocomplete="off" disabled>
         </label>
-        <button class="act meet-go" type="submit" name="mode" value="all" data-track="ui:meet:all-go" disabled>전사 회의 시작</button>
+        <button class="act meet-go" type="submit" name="mode" value="all" data-track="ui:meet:all-go" disabled>{% if tf %}TF 스탠드업 시작{% else %}전사 회의 시작{% endif %}</button>
     </div>
 
+    {% if not tf %}
     <div class="meet-opts boss" data-opts="boss">
         <span class="summon-faces" title="리더를 사장실로">{% for r in office.roster if r.lead %}<span class="face{% if r.id in jobs and jobs[r.id].running %} busy{% endif %}">{{ chibi(r, face=True) }}</span>{% endfor %}</span>
         {% if office_sites | length > 1 %}
@@ -44,6 +60,7 @@
         <input type="text" name="topic" placeholder="사장실 호출 주제 (선택 · 비우면 전체)" maxlength="200" autocomplete="off" disabled>
         <button class="act boss-btn meet-go" type="submit" name="mode" value="boss" data-track="ui:meet:boss-go"{% if boss_on %} data-locked="1" disabled{% endif %}>사장실로 호출</button>
     </div>
+    {% endif %}
 </form>
 <script>
 (function () {
@@ -54,7 +71,7 @@
         block.querySelectorAll(".meet-opts").forEach((p) => {
             const on = p.dataset.opts === pick;
             p.classList.toggle("open", on);
-            p.querySelectorAll("input[type=text], select").forEach((el) => { el.disabled = !on; });
+            p.querySelectorAll("input[type=text], input[type=radio], select").forEach((el) => { el.disabled = !on; });
             const go = p.querySelector(".meet-go");
             if (go) go.disabled = !on || go.dataset.locked === "1";
             if (on) {

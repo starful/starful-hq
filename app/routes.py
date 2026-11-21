@@ -145,10 +145,28 @@ def _flow_now() -> dict:
 def _site_ctx():
     cur = sites.current()
     from app.work import autoship
+    from app import partners as partners_mod
+    floor_mail: dict[str, dict] = {}
+    for oid in sites.OFFICES:
+        sids = partners_mod.floor_site_ids(oid)
+        if not sids:
+            continue
+        ok, why = partners_mod.floor_collect_needed(oid)
+        pending = partners_mod.floor_collect_pending(oid)
+        from app.work import workqueue
+        floor_mail[oid] = {
+            "ok": ok,
+            "why": why,
+            "pending": pending,
+            "pending_label": workqueue.pending_label(pending) if pending else "",
+            "count": len(sids),
+            "per_limit": partners_mod.floor_per_site_limit(len(sids)),
+        }
     return {"staff_map": dict(office.ALL_ROSTER), "flow_now": _flow_now(),
             "kind_of": sites.kind_of, "picks_text": sites.picks_text,"cur_site": cur, "cur_office": sites.office_of(cur.id), "offices": sites.OFFICES, "all_sites": sites.SITES,
             "office_sites": [s for s in sites.office_sites(cur.office) if s.enabled],
-            "office_autoship": autoship.office_states()}
+            "office_autoship": autoship.office_states(),
+            "office_partners_mail": floor_mail}
 
 
 _ICON_COLORS = ("#2f6fd6", "#d9622b", "#2e9e6a", "#8a4fd0", "#c43d6b", "#2a8fa6", "#b08a1e", "#5b6b85")
@@ -176,53 +194,62 @@ app.config["SESSION_COOKIE_NAME"] = "okn_session"   # okadmin (8090) on the same
 
 # ---------- 사장 로그인 (Google) ----------
 # Not logging in = the owner on this Mac, as before. Logging in with a boss account adds Taekki.
-BOSS_BLOCKED_ENDPOINTS = {"site_ship_issue", "site_ship_review", "site_ship_merge", "site_ship_push", "site_ship_run",
-                          "site_ship_fix", "site_restart"}
-BOSS_BLOCKED_ACTIONS = {"issue", "review", "push", "deploy"}
+# Login does not disable any feature.
 
 
 def is_boss() -> bool:
     return boss.is_boss(session.get("boss_email"))
 
 
+def _is_loopback() -> bool:
+    host = (request.host or "").split(":")[0].lower()
+    return host in ("127.0.0.1", "localhost", "::1")
+
+
 @app.context_processor
 def _boss_ctx():
-    return {"boss": boss.state(is_boss()), "boss_desk": office.BOSS_DESK,
-            "boss_blocked": BOSS_BLOCKED_ACTIONS if is_boss() else set()}
-
-
-@app.before_request
-def _boss_limits():
-    """The boss hands out work but doesn't make PRs, merge or deploy (that stays with the owner)."""
-    if request.method != "POST" or not is_boss():
-        return None
-    ep = request.endpoint or ""
-    blocked = ep in BOSS_BLOCKED_ENDPOINTS
-    if ep == "site_action" and (request.view_args or {}).get("aid") in BOSS_BLOCKED_ACTIONS:
-        blocked = True
-    if ep == "site_run" and (request.view_args or {}).get("task") in BOSS_BLOCKED_ACTIONS:
-        blocked = True
-    if not blocked:
-        return None
-    msg = "사장님이 퇴근하시면 작업할게요 (PR·머지·배포)"
-    if request.headers.get("X-Requested-With") == "fetch":
-        return jsonify({"ok": False, "who": None, "message": msg}), 403
-    return msg, 403
+    from app.office import schedule
+    me = is_boss()
+    st = boss.state(me)
+    off = schedule.off_reason()
+    # Header echo when boss is in; map banner (hours_notice) shows for everyone after hours.
+    off_ask = schedule.hours_notice() if me and off else ""
+    return {
+        "boss": st,
+        "boss_desk": office.BOSS_DESK,
+        "boss_off_ask": off_ask,
+        "office_off": off,
+    }
 
 
 def _callback_url() -> str:
-    return url_for("oauth_callback", _external=True)
+    return boss.callback_uri(PORT)
+
+
+def _finish_boss_login(email: str, nxt: str):
+    session["boss_email"] = email
+    session.permanent = True
+    boss.heartbeat()
+    return redirect(nxt if str(nxt).startswith("/") else url_for("site_status"))
 
 
 @app.get("/login")
 def login():
+    nxt = request.args.get("next") or url_for("site_status")
+    force_oauth = request.args.get("oauth") == "1" or os.environ.get("HQ_BOSS_OAUTH") == "1"
+    # Mac local HQ: one-click boss login (Google Console only has :8090 URIs by default).
+    if not force_oauth and _is_loopback():
+        email = boss.default_boss_email()
+        if email and boss.is_boss(email):
+            return _finish_boss_login(email, nxt)
     cid, sec = boss.oauth_client()
     if not cid or not sec:
         return "Google OAuth 설정이 없어요 (okadmin/.env의 GOOGLE_OAUTH_CLIENT_ID / _SECRET)", 500
     state = secrets.token_urlsafe(24)
     session["oauth_state"] = state
-    session["after_login"] = request.args.get("next") or url_for("site_status")
-    return redirect(boss.auth_url(_callback_url(), state))
+    session["after_login"] = nxt
+    cb = _callback_url()
+    return redirect(boss.auth_url(cb, state))
 
 
 @app.get("/oauth/callback")
@@ -230,7 +257,11 @@ def oauth_callback():
     if not request.args.get("state") or request.args.get("state") != session.pop("oauth_state", None):
         return "로그인 확인값이 맞지 않아요. 다시 로그인해 주세요.", 400
     if request.args.get("error"):
-        return f"로그인을 못 했어요: {request.args.get('error')}", 400
+        err = request.args.get("error")
+        hint = ""
+        if err == "redirect_uri_mismatch":
+            hint = f" Google Cloud Console에 redirect URI를 추가하세요: {_callback_url()}"
+        return f"로그인을 못 했어요: {err}.{hint}", 400
     try:
         email = boss.email_from_code(request.args.get("code") or "", _callback_url())
     except Exception as exc:  # noqa: BLE001
@@ -238,11 +269,8 @@ def oauth_callback():
     if not boss.is_boss(email):
         session.pop("boss_email", None)
         return f"{email} 계정은 사장 계정으로 등록되어 있지 않아요 (data/boss.json).", 403
-    session["boss_email"] = email
-    session.permanent = True
-    boss.heartbeat()
     dest = session.pop("after_login", "") or url_for("site_status")
-    return redirect(dest if str(dest).startswith("/") else url_for("site_status"))
+    return _finish_boss_login(email, dest)
 
 
 @app.get("/logout")
@@ -308,7 +336,7 @@ def _glance(snap: dict) -> list[dict]:
     return rows
 
 
-_UI_TEAM = {"research": "plan", "write": "plan", "issue": "plan", "propose": "plan", "search": "mkt", "polish": "mkt",
+_UI_TEAM = {"research": "plan", "write": "plan", "queue": "plan", "issue": "plan", "propose": "plan", "search": "mkt", "polish": "mkt",
             "analyze": "mkt", "fix": "mkt", "images": "design", "refactor": "dev", "review": "dev", "push": "dev", "ship": "dev"}
 
 
@@ -368,14 +396,14 @@ def _render_site(step: str, **extra):
         affiliate=affiliate.summary(),
         aff_sync=affsync.summary(),
         glance=_glance(snap),
-        ship_stage=_ship_stage(site) if step in ("status", "ship") else None,
+        ship_stage=_ship_stage(site) if step == "status" else None,
         next_up=_next_up(),
         cost_cached=_cost_cached(),
         meet_on={m: meeting.running(m) for m in meeting.MODES},
         boss_on=meeting.running("boss"),
         free_team={t: [m for m in office.TEAMS[t] if not jobs.running(m)] for t in office.TEAMS},
         free_people=[p["id"] for p in office.PEOPLE if not jobs.running(p["id"])],
-        free_leaders=[m for m in office.LEADERS if not jobs.running(m)],
+        free_leaders=[m for m in office.company_leaders() if not jobs.running(m)],
         **extra,
     )
 
@@ -405,6 +433,13 @@ def _back(step: str, **args):
     return redirect(url)
 
 
+def _meet_kind(p: dict) -> str:
+    """Short label: 전사 회의 · 리더 회의 · …"""
+    if p.get("meeting"):
+        return (p.get("mode_label") or "전사 회의").split(" (")[0]
+    return "제안"
+
+
 def _meet_page_ctx() -> dict:
     """Date chips + that day's meetings for the 회의 tab."""
     hist = planning.history(80)
@@ -423,6 +458,11 @@ def _meet_page_ctx() -> dict:
     if not proposal and day_meetings:
         proposal = day_meetings[0]
     day_i = days.index(day) if day in days else -1
+    day_kinds: list[str] = []
+    for p in day_meetings:
+        k = _meet_kind(p)
+        if k not in day_kinds:
+            day_kinds.append(k)
     return {
         "proposal": proposal,
         "proposals": hist,
@@ -432,6 +472,7 @@ def _meet_page_ctx() -> dict:
         "proposal_day_newer": days[day_i - 1] if day_i > 0 else "",
         "proposal_day_older": days[day_i + 1] if 0 <= day_i < len(days) - 1 else "",
         "day_meetings": day_meetings,
+        "day_kinds": day_kinds,
         "day_counts": {d: sum(1 for h in hist if str(h.get("at") or "")[:10] == d) for d in days[:30]},
     }
 
@@ -441,6 +482,16 @@ def home():
     snap = snapshot.load_or_refresh()
     all_jobs = jobs.all_jobs()
     return render_template("home.html", snap=snap, office=office.build_office(snap, all_jobs))
+
+
+@app.get("/partners/schools")
+def partners_schools():
+    """옛 북마크 → 제휴 메일 있는 사이트 현황."""
+    from app import partners as partners_mod
+    sid = sites.current().id
+    if sid not in partners_mod.enabled_sites():
+        sid = "jpcampus"
+    return redirect(url_for("site_status", site=sid))
 
 
 @app.get("/office")
@@ -463,10 +514,51 @@ def job():
 @app.get("/staff")
 def staff_page():
     """👥 사원: every floor's people and what they're doing now (a small card opened from the header)."""
+    from app.office import staffing
     floors = office.staff_directory(jobs.all_jobs())
     if request.args.get("format") == "json":
         return jsonify([{**f, "sites": [s.id for s in f["sites"]]} for f in floors])
-    return render_template("_staff_pop.html", floors=floors, here=sites.current().office)
+    return render_template("_staff_pop.html", floors=floors, here=sites.current().office, staffing=staffing.summary())
+
+
+@app.post("/staff/hire")
+def staff_hire():
+    """채용 공고: 사장님이 고른 팀·층 → 후보 제안 (확인은 /staff/approve)."""
+    from app.office import staffing
+    body = request.get_json(silent=True) or {}
+    team = (request.form.get("team") or body.get("team") or "").strip()
+    office = (request.form.get("office") or body.get("office") or "").strip()
+    why = (request.form.get("why") or body.get("why") or "").strip()
+    return jsonify(staffing.propose_hire(team=team, office=office, why=why))
+
+
+@app.post("/staff/fire")
+def staff_fire():
+    """해고 제안. who 없으면 자동 후보 · 리더면 successor 필수(없으면 같은 팀 첫 사원)."""
+    from app.office import staffing
+    who = (request.form.get("who") or (request.get_json(silent=True) or {}).get("who") or "").strip()
+    succ = (request.form.get("successor") or (request.get_json(silent=True) or {}).get("successor") or "").strip()
+    why = (request.form.get("why") or (request.get_json(silent=True) or {}).get("why") or "").strip()
+    if who:
+        return jsonify(staffing.propose_fire(who, successor=succ, why=why))
+    return jsonify(staffing.propose_fire_auto())
+
+
+@app.post("/staff/approve")
+def staff_approve():
+    from app.office import staffing
+    body = request.get_json(silent=True) or {}
+    pid = (request.form.get("id") or body.get("id") or "").strip()
+    succ = (request.form.get("successor") or body.get("successor") or "").strip()
+    return jsonify(staffing.approve(pid, successor=succ))
+
+
+@app.post("/staff/reject")
+def staff_reject():
+    from app.office import staffing
+    body = request.get_json(silent=True) or {}
+    pid = (request.form.get("id") or body.get("id") or "").strip()
+    return jsonify(staffing.reject(pid))
 
 
 @app.post("/usage/track")
@@ -509,7 +601,6 @@ def site_analytics_card():
         }
     return render_template("_analytics_card.html", traffic=traffic)
 
-
 def _site_users_html():
     from app import site_users as su
     try:
@@ -522,7 +613,7 @@ def _site_users_html():
 
 @app.get("/site/<site>/users")
 def site_users_card():
-    """👥 이용자 보기 (현황 버튼 → dialog). SiteKPI=visitlog+설문, visitlog 사이트=방문 흐름, 나머지=GA4."""
+    """👥 이용자 보기 (현황 버튼 → dialog). SiteKPI=visitlog+설문, 나머지=GA4."""
     return _site_users_html()
 
 
@@ -542,6 +633,90 @@ def site_url_stats():
 def site_sitekpi_users():
     """옛 URL → 같은 이용자 dialog."""
     return _site_users_html()
+
+
+@app.get("/site/<site>/partners")
+@app.get("/site/<site>/partners/schools")  # campus 옛 URL
+def site_partners():
+    """제휴 메일 (현황 버튼 + 팝업). 사이트별 목록 · 시장 고정."""
+    from app import partners as partners_mod
+    from app.work import workqueue
+    sid = sites.current_id()
+    c = partners_mod.cfg(sid)
+    if not c:
+        return ("", 404)
+    has_email = (request.args.get("has_email") or "").strip()
+    if has_email not in ("", "0", "1"):
+        has_email = ""
+    pending = workqueue.pending_tasks(sid).get("partner_collect") or ""
+    off = sites.office_of()
+    floor_sids = partners_mod.floor_site_ids()
+    return render_template(
+        "_partners_list.html",
+        items=partners_mod.items(sid, has_email=has_email),
+        summary=partners_mod.summary(sid),
+        has_email=has_email,
+        from_mail=c["from_mail"],
+        market=c["market"],
+        noun=c["noun"],
+        noun_col=c["noun_col"],
+        site_id=sid,
+        collect_pending=pending,
+        collect_pending_label=workqueue.pending_label(pending) if pending else "",
+        floor_label=off.floor_label,
+        floor_site_count=len(floor_sids),
+        floor_per_limit=partners_mod.floor_per_site_limit(len(floor_sids)),
+    )
+
+
+@app.post("/site/<site>/partners/collect")
+def site_partners_collect():
+    """제휴 공개 메일 수집 → 실행 큐 (메일 없는 곳 최대 20)."""
+    from app import partners as partners_mod
+    from app.work import workqueue
+    sid = sites.current_id()
+    c = partners_mod.cfg(sid)
+    if not c:
+        abort(404)
+    no_mail = len(partners_mod.items(sid, has_email="0"))
+    if not no_mail:
+        msg = "메일 없는 곳이 없어요"
+        return jsonify({"ok": False, "msg": msg}) if _fetch() else redirect(url_for("site_status"))
+    label = f"{c['noun']} 공개 메일 수집 (최대 {partners_mod.COLLECT_LIMIT})"
+    row = workqueue.enqueue(
+        {"source": "task", "task": "partner_collect", "title": label, "label": label, "site": sid}
+    )
+    if not row:
+        msg = workqueue.pending_label(workqueue.pending_tasks(sid).get("partner_collect", "queued"))
+        return jsonify({"ok": False, "msg": f"이미 {msg}", "queued": True}) if _fetch() else redirect(url_for("site_status"))
+    workqueue.kick(sid)
+    msg = f"큐에 담았어요 · 곧 시작 · {label}"
+    return jsonify({"ok": True, "msg": msg, "queued": True}) if _fetch() else redirect(url_for("site_status"))
+
+
+@app.post("/site/<site>/partners/collect-floor")
+def site_partners_collect_floor():
+    """이 층 제휴 사이트 전부 메일 수집 → 실행 큐 (Places 한도 분배)."""
+    from app import partners as partners_mod
+    sid = sites.current_id()
+    if sid not in partners_mod.enabled_sites():
+        abort(404)
+    ok, msg, queued = partners_mod.enqueue_floor_collect()
+    body = {"ok": ok, "msg": msg, "queued": queued or ok}
+    return jsonify(body) if _fetch() else redirect(url_for("site_status"))
+
+
+@app.post("/office/<office_id>/partners/collect")
+def office_partners_collect(office_id: str):
+    """층 메뉴에서 제휴 메일 수집 맡기기 (사이트 안 들어가도 됨)."""
+    from app import partners as partners_mod
+    if office_id not in sites.OFFICES:
+        abort(404)
+    if not partners_mod.floor_site_ids(office_id):
+        abort(404)
+    ok, msg, queued = partners_mod.enqueue_floor_collect(office_id)
+    body = {"ok": ok, "msg": msg, "queued": queued or ok}
+    return jsonify(body) if _fetch() else redirect(request.referrer or url_for("home"))
 
 @app.post("/refresh")
 def refresh():
@@ -573,7 +748,7 @@ def site_status():
             if proposal:
                 break
     return _render_site("status", tool_rows=tools.status(), proposal=proposal,
-                        focus_opts=planning.FOCUS,
+                        focus_opts=planning.focus_map(),
                         meeting_on=meeting.running("all"), leaders_on=meeting.running("leaders"),
                         site_prefs=workqueue.prefs())
 
@@ -581,16 +756,20 @@ def site_status():
 @app.get("/site/<site>/meetings")
 def site_meet():
     """회의 결과 페이지 (탭 아님). 현황「회의 결과 보기」→ 여기 → 「현황으로」."""
-    return _render_site("meet", focus_opts=planning.FOCUS, **_meet_page_ctx())
+    return _render_site("meet", focus_opts=planning.focus_map(), **_meet_page_ctx())
 
 @app.post("/site/<site>/meeting")
 def site_meeting():
-    if office.is_borrowed():   # B1 has no meeting room
+    if office.is_borrowed():   # legacy borrow floors only
         return _back("status")
     focus = request.form.get("focus") or "all"
     ask = (request.form.get("ask") or "").strip()[:300]
     topic = (request.form.get("topic") or "").strip()[:200]
     mode = request.form.get("mode") or "all"
+    if meeting.is_tf() and mode in meeting._TF_BLOCKED:
+        if _fetch():
+            return jsonify({"ok": False, "msg": "B1 TF는 주제별 스탠드업만 해요 · 다른 층 사원은 부르지 않아요"})
+        return _back("status")
     if mode == "all":  # optional aside topic; does not replace the main FOCUS
         topic = (request.form.get("all_topic") or topic or "").strip()[:200]
     people = [p for p in request.form.getlist("people") if p][: meeting.BOSS_MAX]
@@ -695,9 +874,17 @@ def site_autoship():
 def office_autoship(office_id: str):
     """Toggle autoship for a floor without entering a site."""
     from app.work import autoship
+    from app import tools as tools_mod
     if office_id not in sites.OFFICES:
         abort(404)
     on = request.form.get("on") == "1"
+    if on:
+        blocked, why = tools_mod.claude_blocked()
+        if blocked:
+            msg = f"Claude 한도라 자동 진행을 못 켜요 · {why}"
+            return jsonify({"ok": False, "msg": msg, "office": office_id, "on": False}) if _fetch() \
+                else redirect(request.referrer or url_for("home"))
+        tools_mod.clear_claude_halt()
     autoship.set_enabled(on, office_id=office_id)
     off = sites.OFFICES[office_id]
     if on:
@@ -708,13 +895,6 @@ def office_autoship(office_id: str):
            if on else f"{off.floor_label} 자동 진행을 껐어요 · 버튼으로 진행해요")
     return jsonify({"ok": True, "msg": msg, "office": office_id, "on": on, "floor_label": off.floor_label}) if _fetch() \
         else redirect(request.referrer or url_for("home"))
-
-
-@app.post("/site/<site>/checked")
-def site_checked():
-    from app.work import autoship
-    at = autoship.mark_checked()
-    return jsonify({"ok": True, "msg": f"사이트 확인 완료 · {at[5:16]}"}) if _fetch() else redirect(url_for("site_status"))
 
 
 @app.post("/site/<site>/meeting/top")
@@ -748,7 +928,14 @@ def site_meeting_run():
 @app.post("/site/<site>/queue/pause")
 def site_queue_pause():
     from app.work import workqueue
+    from app import tools as tools_mod
     on = request.form.get("on") == "1"
+    if not on:
+        blocked, why = tools_mod.claude_blocked()
+        if blocked:
+            msg = f"Claude 한도라 실행 큐를 못 켜요 · {why}"
+            return jsonify({"ok": False, "msg": msg}) if _fetch() else redirect(url_for("site_status"))
+        tools_mod.clear_claude_halt()
     workqueue.set_paused(on)
     msg = "실행 큐를 멈췄어요" if on else "실행 큐를 다시 돌렸어요"
     return jsonify({"ok": True, "msg": msg}) if _fetch() else redirect(url_for("site_status"))
@@ -792,7 +979,8 @@ def site_action(aid: str):
 def site_propose():
     focus = request.form.get("focus") or "all"
     ask = (request.form.get("ask") or "").strip()[:300]
-    jobs.start_task("propose", "사업·기능 제안 정리 시작", planning.propose, focus if focus in planning.FOCUS else "all", ask)
+    fmap = planning.focus_map()
+    jobs.start_task("propose", "사업·기능 제안 정리 시작", planning.propose, focus if focus in fmap else "all", ask)
     return _back("status")
 
 
@@ -824,11 +1012,20 @@ def site_write():
     if request.args.get("path"):  # old links: editing lives in 다듬기 now
         return _back("polish", path=request.args.get("path"))
     workers.ensure_analysis_picks()
-    return _render_site("write", research=workers.read_research(), seed_chips=workers.seed_chips(20))
+    research = workers.read_research()
+    return _render_site(
+        "write",
+        research=research,
+        seed_chips=workers.seed_chips(20),
+        pick_groups=workers.pick_groups_for_write(research),
+        ba_ja_pending=workers.ba_ja_pending(),
+    )
 
 
 @app.post("/site/<site>/write/research")
 def site_write_research():
+    if not sites.current().can_research:
+        return _back("write")
     seeds = [x.strip() for x in request.form.getlist("seed") if x.strip()][:20]
     extra = (request.form.get("seed_extra") or "").strip()
     if extra:
@@ -839,9 +1036,31 @@ def site_write_research():
         except ValueError:
             return default
 
-    n_topics = num("n_topics", 3, MAX_BATCH, 10)
+    # OKPy: ≥2 picks per writable category (8×2) so 맡길 목록이 비지 않음.
+    default_n = 16 if sites.current().content == "okpy_posts" else 10
+    high = 24 if sites.current().content == "okpy_posts" else MAX_BATCH
+    n_topics = num("n_topics", 3, high, default_n)
     # no auto-write after research — picks stay on the list for the owner to choose
     jobs.start_task("research", "트렌드 리서치 시작", workers.research, seeds, 0, n_topics)
+    return _back("write")
+
+
+@app.post("/site/<site>/write/queue")
+def site_write_queue():
+    """CompanyDB: planning finds companies and puts them in universe_extra (owner types nothing)."""
+    if sites.current().content != "companydb":
+        return jsonify({"ok": False, "msg": "CompanyDB만 회사 찾기를 해요"}) if _fetch() else _back("write")
+    n = 10
+    try:
+        n = max(3, min(MAX_BATCH, int(request.form.get("n") or 10)))
+    except ValueError:
+        n = 10
+    jobs.start_task(
+        "queue",
+        f"추가할 회사 {n}곳 찾기 시작",
+        workers.find_and_queue_companies,
+        n,
+    )
     return _back("write")
 
 
@@ -870,11 +1089,12 @@ MAX_BATCH = 15
 @app.post("/site/<site>/write/new")
 def site_write_new():
     """Manual topics, one per line (up to 15), split across the writing team."""
+    from app.content import contentkit
     category = (request.form.get("category") or "").strip()
     if category not in workers.categories():
         return _back("write")
     topics = [t.strip()[:200] for t in (request.form.get("topics") or request.form.get("topic") or "").splitlines() if t.strip()]
-    items = [[category, t] for t in topics[:MAX_BATCH]]
+    items = [[contentkit.resolve_write_category(category, t), t] for t in topics[:MAX_BATCH]]
     jobs.start_task_split("write", items, lambda n: f"직접 고른 {sites.current().words['noun']} {n}{sites.current().words['unit']} {sites.current().words['verb']} 시작", workers.write_topics)
     return _back("write")
 
@@ -899,10 +1119,19 @@ def site_polish():
 
 @app.post("/site/<site>/polish")
 def site_polish_run():
+    from app.work import actions, workqueue
     rels = [r.strip() for r in request.form.getlist("rel") if r.strip() and snapshot.safe_post(r.strip())][:MAX_BATCH]
     ask = (request.form.get("ask") or "").strip()[:400]
     if rels:
-        jobs.start_task_split("polish", rels, lambda n: f"글 {n}편 다듬기 시작", marketing.polish_many, ask)
+        hold = actions.pr_hold_reason("polish")
+        if hold:
+            workqueue.enqueue({
+                "source": "task", "task": "polish", "title": f"글 {len(rels)}편 다듬기",
+                "label": hold, "site": sites.current_id(), "hold": True, "hold_reason": hold,
+            })
+            workqueue.kick(sites.current_id())
+        else:
+            jobs.start_task_split("polish", rels, lambda n: f"글 {n}편 다듬기 시작", marketing.polish_many, ask)
     return _back("search")
 
 
@@ -977,22 +1206,39 @@ def site_search_run():
             rels.append(rel)
     if not urls and not rels:
         return _back("search")
+    from app.work import actions, workqueue
     _, site = _site()
     if urls:
-        by_url = {r["url"]: r for r in (site.get("search") or {}).get("rows") or []}
-        rows = [
-            {
-                "url": url,
-                "impressions": (by_url.get(url) or {}).get("impressions") or 0,
-                "ctr": (by_url.get(url) or {}).get("ctr") or 0,
-                "position": (by_url.get(url) or {}).get("position") or 0,
-                "pattern": (by_url.get(url) or {}).get("pattern") or "low_ctr",
-            }
-            for url in urls
-        ]
-        jobs.start_task_split("search", urls, lambda n: f"글 {n}편 고치기 시작", workers.search_fix, rows)
+        hold = actions.pr_hold_reason("search")
+        if hold:
+            workqueue.enqueue({
+                "source": "task", "task": "search", "title": f"글 {len(urls)}편 고치기",
+                "label": hold, "site": sites.current_id(), "hold": True, "hold_reason": hold,
+            })
+            workqueue.kick(sites.current_id())
+        else:
+            by_url = {r["url"]: r for r in (site.get("search") or {}).get("rows") or []}
+            rows = [
+                {
+                    "url": url,
+                    "impressions": (by_url.get(url) or {}).get("impressions") or 0,
+                    "ctr": (by_url.get(url) or {}).get("ctr") or 0,
+                    "position": (by_url.get(url) or {}).get("position") or 0,
+                    "pattern": (by_url.get(url) or {}).get("pattern") or "low_ctr",
+                }
+                for url in urls
+            ]
+            jobs.start_task_split("search", urls, lambda n: f"글 {n}편 고치기 시작", workers.search_fix, rows)
     if rels and sites.current().can_polish:
-        jobs.start_task_split("polish", rels, lambda n: f"글 {n}편 다듬기 시작", marketing.polish_many, "")
+        hold = actions.pr_hold_reason("polish")
+        if hold:
+            workqueue.enqueue({
+                "source": "task", "task": "polish", "title": f"글 {len(rels)}편 다듬기",
+                "label": hold, "site": sites.current_id(), "hold": True, "hold_reason": hold,
+            })
+            workqueue.kick(sites.current_id())
+        else:
+            jobs.start_task_split("polish", rels, lambda n: f"글 {n}편 다듬기 시작", marketing.polish_many, "")
     return _back("search")
 
 
@@ -1112,8 +1358,6 @@ def site_youtube_api(path: str = ""):
     if head == "ship" and request.method == "GET":
         return jsonify(ytq.ship_status(sid))
     if head == "ship" and request.method == "POST":
-        if is_boss():
-            return jsonify({"ok": False, "error": "사장님이 퇴근하시면 작업할게요 (PR·머지·배포)", "message": "사장님이 퇴근하시면 작업할게요 (PR·머지·배포)"}), 403
         out = ytq.enqueue_ship(sid)
         code = 200 if out.get("ok") else 409
         return jsonify(out), code

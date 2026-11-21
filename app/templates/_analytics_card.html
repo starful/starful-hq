@@ -32,6 +32,13 @@
         <p class="traffic-q-title">GSC 검색어
             <small>{% if s.clicks %}클릭 {{ '{:,}'.format(s.clicks) }}{% if s.d_clicks %} <i class="{{ 'up' if s.d_clicks.up else 'down' }}">{{ s.d_clicks.pct }}</i>{% endif %} · {% endif %}노출 많은 순</small>
         </p>
+        {% if s.days %}
+        <div class="gsc-trend" data-gsc-trend>
+            <div class="traffic-chart-wrap"><canvas id="hq-gsc-chart" height="140"></canvas></div>
+            <p class="ga4-legend"><span class="cur" style="color:#1a73e8">—— 클릭</span> <span class="prev" style="color:#5e35b1">—— 노출</span>{% if s.d_impressions and s.d_impressions.pct %} · 노출 <i class="{{ 'up' if s.d_impressions.up else 'down' }}">{{ s.d_impressions.pct }}</i>{% endif %}</p>
+            <script type="application/json" id="hq-gsc-data">{{ s.days | tojson }}</script>
+        </div>
+        {% endif %}
         {% if s.error and not s.queries %}<p class="hint warn">GSC: {{ s.error }}</p>
         {% elif s.queries %}
         <div class="traffic-q-scroll">
@@ -135,5 +142,51 @@
         }
     }
     boot();
+})();
+</script>
+<script>
+(function () {
+    const el = document.getElementById("hq-gsc-data");
+    const canvas = document.getElementById("hq-gsc-chart");
+    if (!el || !canvas) return;
+    let rows = [];
+    try { rows = JSON.parse(el.textContent || "[]"); } catch (_) { return; }
+    if (!rows.length) return;
+    function paint() {
+        if (canvas._hqChart) { try { canvas._hqChart.destroy(); } catch (_) {} }
+        canvas._hqChart = new Chart(canvas, {
+            type: "line",
+            data: {
+                labels: rows.map((r) => String(r.date).slice(5).replace("-", "/")),
+                datasets: [
+                    { label: "클릭", data: rows.map((r) => r.clicks), yAxisID: "y",
+                      borderColor: "#1a73e8", tension: 0.3, pointRadius: 0, borderWidth: 2, fill: false },
+                    { label: "노출", data: rows.map((r) => r.impressions), yAxisID: "y1",
+                      borderColor: "#5e35b1", tension: 0.3, pointRadius: 0, borderWidth: 2, fill: false },
+                ],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: "index", intersect: false },
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { ticks: { maxTicksLimit: 6, font: { size: 9 }, color: "#8a91a3" }, grid: { display: false } },
+                    y: { position: "left", beginAtZero: true, ticks: { font: { size: 9 }, color: "#1a73e8" }, grid: { color: "#eef0f4" } },
+                    y1: { position: "right", beginAtZero: true, ticks: { font: { size: 9 }, color: "#5e35b1" }, grid: { display: false } },
+                },
+            },
+        });
+    }
+    function boot(n) {
+        if (window.Chart) return paint();
+        if (n > 40) return;                       // the GA4 block loads Chart.js; wait for it, else load it
+        if (n === 20 && !document.querySelector('script[src*="chart.js"]')) {
+            const s = document.createElement("script");
+            s.src = "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js";
+            document.head.appendChild(s);
+        }
+        setTimeout(() => boot(n + 1), 150);
+    }
+    boot(0);
 })();
 </script>

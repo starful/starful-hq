@@ -78,6 +78,32 @@ def test_feature_held_on_open_pr_then_released_after_merge(tmp_path, monkeypatch
                    for x in workqueue.list_items())
 
 
+def test_search_and_polish_held_on_open_pr(tmp_path, monkeypatch):
+    jobs.JOBS.clear()
+    monkeypatch.setattr(planning, "PROPOSAL_DIR", tmp_path / "p")
+    monkeypatch.setattr(planning, "PROPOSAL_PATH", tmp_path / "p.json")
+    _queue_paths(tmp_path, monkeypatch)
+    flow = {"pr": {"number": 114}, "merged": False}
+    monkeypatch.setattr(office, "read_flow", lambda: flow)
+    pid = planning.save({"meeting": True, "ideas": [
+        {"title": "제목 고치기", "site": "okpy", "action": {"type": "search"}},
+        {"title": "본문 다듬기", "site": "okpy", "action": {"type": "polish"}},
+        {"title": "분석", "site": "okpy", "action": {"type": "analyze"}},
+    ]})
+    assert workqueue.enqueue_meeting(pid) == 3
+    with sites.use("okpy"):
+        by_task = {x["task"]: x for x in workqueue.list_items()}
+        assert by_task["search"]["status"] == workqueue.STATUS_HELD
+        assert by_task["polish"]["status"] == workqueue.STATUS_HELD
+        assert by_task["analyze"]["status"] == workqueue.STATUS_QUEUED
+        assert "PR #114" in by_task["search"]["error"]
+        flow["merged"] = True
+        workqueue._release_held()
+        statuses = {x["task"]: x["status"] for x in workqueue.list_items()}
+        assert statuses["search"] == workqueue.STATUS_QUEUED
+        assert statuses["polish"] == workqueue.STATUS_QUEUED
+
+
 def test_search_backlog_always_on_and_clear_targets(tmp_path, monkeypatch):
     monkeypatch.setattr(workqueue, "_prefs_path", lambda site_id=None: tmp_path / "prefs.json")
     monkeypatch.setattr(workqueue, "_queue_path", lambda site_id=None: tmp_path / "q.json")

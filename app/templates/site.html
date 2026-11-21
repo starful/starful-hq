@@ -6,6 +6,7 @@
     <title>{{ cur_site.label }} · {{ cur_office.name }} — Starful HQ</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='sitekpi_users.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='partners_schools.css') }}">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='hq-icon.svg') }}">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='hq-icon-32.png') }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='hq-icon-180.png') }}">
@@ -21,7 +22,7 @@
 {% set who = next_up %}
 {# B1(borrow) has no planners: PR 만들기는 개발팀이 맡음 (office.BORROW_TEAM). #}
 {% set issue_team = "dev" if office.borrow else "plan" %}
-{% set task_team = {"research": "plan", "write": "plan", "issue": issue_team, "search": "mkt", "polish": "mkt", "analyze": "mkt", "refactor": "dev", "propose": "plan", "fix": "mkt",
+{% set task_team = {"research": "plan", "write": "plan", "queue": "plan", "ba_ja": "plan", "issue": issue_team, "search": "mkt", "polish": "mkt", "analyze": "mkt", "refactor": "dev", "propose": "plan", "fix": "mkt",
                     "images": "design", "review": "dev", "push": "dev", "ship": "dev"} %}
 {% set busy_ids = jobs | dictsort | selectattr('1.running') | map(attribute='0') | list %}
 {% macro ask(task, words) -%}
@@ -55,7 +56,7 @@
     </ul>
     {% if a.findings %}<h3>보인 것</h3><ul class="findings">{% for f in a.findings %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
     {% if a.actions %}<h3>할 일</h3><ul class="findings">{% for x in a.actions %}<li><b>{{ x.team }}</b> {{ x.text }}</li>{% endfor %}</ul>{% endif %}
-    {% if a.topics %}<h3>새 글 아이디어 <small>(기획팀 상세의 맡길 목록에 들어가요)</small></h3><ul class="findings">{% for x in a.topics %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+    {% if a.topics %}<h3>{% if cur_site.content == 'companydb' %}추가할 회사{% else %}새 글 아이디어{% endif %} <small>(기획팀 상세의 맡길 목록에 들어가요)</small></h3><ul class="findings">{% for x in a.topics %}<li>{% if x is mapping %}{{ x.market }} {{ x.ticker }} {{ x.name_en }}{% if x.why %} — {{ x.why }}{% endif %}{% else %}{{ x }}{% endif %}</li>{% endfor %}</ul>{% endif %}
     {% if a.errors %}<p class="hint warn">일부 숫자를 못 받았어요: {{ a.errors | join(' · ') }}</p>{% endif %}
     {% endif %}
 </details>
@@ -98,14 +99,13 @@
     </nav>
 
     {% set team_text = {
-        "plan": (waiting.write ~ " 남음" if waiting.write else ("관리·SEO만 · 글쓰기 없음" if office.borrow else "트렌드로 주제 찾기 · 글쓰기")) ~ ((" · " ~ waiting.issue) if waiting.issue and not office.borrow else ""),
+        "plan": (waiting.write ~ " 남음" if waiting.write else ("관리·SEO만 · 글쓰기 없음" if office.borrow else ("회사 찾기 · 추가" if not cur_site.can_research else "트렌드로 주제 찾기 · 글쓰기"))) ~ ((" · " ~ waiting.issue) if waiting.issue and not office.borrow else ""),
         "mkt": (("고칠 검색 글 " ~ (ns.rows | length) ~ "편") if ns.rows else "고칠 검색 글 없음 · 다듬기 · 분석"),
         "design": "이미지 " ~ (site.images.count or 0) ~ "개" ~ (" · YouTube" if cur_site.youtube_on else "") ~ " · 목록에서 고르기",
         "dev": ([waiting.issue if office.borrow else none, waiting.review, waiting.deploy] | select | join(" · ")) or "자동 진행 · 막히면 상세",
     } %}
     {% if quick %}
     {% set doing = quick.people | selectattr('busy') | list %}
-    {% set st = ship_stage or {} %}
     <section class="quick team-sum tone-{{ quick.team }}" data-team="{{ quick.team }}">
         <div class="ts-head">
             <b>{{ quick.title }}</b>
@@ -121,21 +121,6 @@
             {% else %}
             {% with team=quick.team %}{% include "_team_meet.html" %}{% endwith %}
             {% endif %}
-            {% if quick.team == "dev" and st %}
-            <div class="ts-ship">
-                <p class="ts-ship-line">{% if st.key == "check" %}✅ {{ st.label }} · <a href="{{ st.url }}" target="_blank" rel="noopener">사이트 열기</a>
-                {% elif st.key == "stuck" %}<span class="warn">{{ st.label }}{% if st.detail %} · {{ st.detail }}{% endif %}</span>
-                {% elif st.key != "idle" %}{{ st.label }}{% if st.detail %} · {{ st.detail }}{% endif %}
-                {% else %}올릴 변경 없음{% if st.detail %} · {{ st.detail }}{% endif %}{% endif %}</p>
-                {% if st.key == "check" %}
-                <form method="post" action="{{ url_for('site_checked') }}" class="inline-form"><button class="act ghost small" type="submit">✓ 확인했어요</button></form>
-                {% endif %}
-                <form method="post" action="{{ url_for('site_autoship') }}" class="ss-auto" data-auto data-floor-label="{{ st.floor_label or cur_office.floor_label }}">
-                    <input type="hidden" name="on" value="{{ '0' if st.auto else '1' }}">
-                    <button type="submit" class="f3-toggle{% if st.auto %} on{% endif %}" title="{{ st.floor_label or cur_office.floor_label }} 전체 · PR·리뷰·머지·배포"><span></span>{{ st.floor_label or cur_office.floor_label }} 자동 진행 {{ '켬' if st.auto else '끔' }}</button>
-                </form>
-            </div>
-            {% endif %}
         </div>
     </section>
     {% elif step == "status" %}
@@ -150,25 +135,36 @@
             {% if tool_rows | selectattr('id', 'equalto', 'claude') | selectattr('login') | list %}
             <form method="post" action="{{ url_for('site_claude_login') }}" class="inline-form"><button class="act ghost small" type="submit">Claude 로그인</button></form>
             {% endif %}
+            {% set claude_limit = tool_rows | selectattr('id', 'equalto', 'claude') | selectattr('limit') | list %}
+            {% if claude_limit %}
+            <span class="chip bad" title="{{ claude_limit[0].detail }} · {{ claude_limit[0].fix }}">⏸ Claude 한도 · 자동 진행 멈춤</span>
+            {% endif %}
             {% if bad_tools %}
             <form method="post" action="{{ url_for('site_tools_check') }}" class="inline-form"><button class="act ghost small" type="submit">도구 다시 확인</button></form>
             {% endif %}
         </div>
 
         <div class="ss-block">
-            <p class="ss-title">💬 전체 회의 <small>{% if proposal.at %}최근 {{ proposal.at[5:] }} {{ (proposal.mode_label or '전사 회의').split(' (')[0] }}{% else %}열면 결과가 쌓여요{% endif %}</small></p>
-            {% if office.borrow %}<p class="hint">B1에는 회의실이 없어요. 회의는 1층·2층에서 열어요.</p>{% else %}{% include "_meeting_buttons.html" %}{% endif %}
-            <p class="ss-meet-link">
-                <a href="{% if proposal.id %}{{ url_for('site_meet', proposal=proposal.id) }}{% else %}{{ url_for('site_meet') }}{% endif %}">회의 결과 보기 →</a>
+            <p class="ss-title">💬 {% if cur_office.id == 'basement' %}TF 스탠드업{% else %}전체 회의{% endif %} <small>{% if proposal.at %}최근 {{ proposal.at[5:] }} {{ (proposal.mode_label or '전사 회의').split(' (')[0] }}{% elif cur_office.id == 'basement' %}수익화 · 편의 · 기능{% else %}열면 결과가 쌓여요{% endif %}</small></p>
+            {% if office.borrow %}<p class="hint">이 층은 빌리기 모드라 회의실이 없어요. 1층·2층에서 열어요.</p>{% else %}{% include "_meeting_buttons.html" %}{% endif %}
+            <div class="ss-actions">
+                <a class="ss-meet-btn" href="{% if proposal.id %}{{ url_for('site_meet', proposal=proposal.id) }}{% else %}{{ url_for('site_meet') }}{% endif %}">회의 결과 보기</a>
                 {% if st.key == "check" %}
-                <span class="ss-check">✅ {{ st.label }} · <a href="{{ st.url }}" target="_blank" rel="noopener">🌐 사이트 열기</a>
-                    <form method="post" action="{{ url_for('site_checked') }}" class="inline-form"><button class="act ghost small" type="submit">✓ 확인했어요</button></form>
-                </span>
+                <span class="ts-ship-badge">올렸어요</span>
+                {% if st.deployed_at %}<span class="ts-ship-meta">{{ st.deployed_at[5:16] }}</span>{% endif %}
+                {% if st.url %}<a class="ts-ship-link" href="{{ st.url }}" target="_blank" rel="noopener">사이트 열기</a>{% endif %}
+                {% elif cur_site.domain %}
+                <a class="ts-ship-link" href="https://{{ cur_site.domain }}" target="_blank" rel="noopener">사이트 열기</a>
                 {% endif %}
                 <span class="su-mount" id="su-card" data-url="{{ url_for('site_users_card') }}">
                     <button type="button" class="ss-su-btn" data-su-open>{% if cur_site.id == 'sitekpi' %}이용자 · 설문 보기{% else %}이용자 보기{% endif %}</button>
                 </span>
-            </p>
+                {% if cur_site.id in ('jpcampus', 'krcampus', 'okonsen', 'okcaddie', 'jpfun', 'krcare') %}
+                <span class="ps-mount" id="ps-card" data-url="{{ url_for('site_partners') }}" data-stale="1">
+                    <button type="button" class="ss-partners-btn ps-open" data-ps-open disabled>메일 목록 보기</button>
+                </span>
+                {% endif %}
+            </div>
         </div>
 
         <div class="ss-block traffic-card" id="traffic-card" data-url="{{ url_for('site_analytics_card') }}" data-stale="1">
@@ -182,11 +178,11 @@
     {% endif %}
 
     {% set details = {
-        "write": ("기획팀 상세", "키워드 고르기 · " ~ cur_site.words.picks ~ " 골라 맡기기"),
+        "write": ("기획팀 상세", ("회사 찾기 · " ~ cur_site.words.verb) if not cur_site.can_research else ("키워드 고르기 · " ~ cur_site.words.picks ~ " 골라 맡기기")),
         "search": ("마케팀 상세", "분석 · 고칠 글" ~ (" · 다듬기" if cur_site.can_polish else "")),
         "polish": ("직접 고치기", "본문 직접 수정"),
         "images": ("디자인팀 상세", "한 장씩 보고 고치기 · " ~ ((live_images or site.images).count if (live_images or site.images) else site.images.count) ~ "개"),
-        "ship": ("개발팀 상세", "반영 상태 · 최적화 · 공통화"),
+        "ship": ("개발팀 상세", "최적화 · 공통화"),
     } %}
     {% set step_url = {"write": url_for('site_write'), "search": url_for('site_search'), "images": url_for('site_images'), "ship": url_for('site_ship')} %}
     {% if tab not in ("status", "meet") and step in details %}
@@ -217,12 +213,30 @@
         {% set chips = seed_chips or {"all": [], "checked": []} %}
         {% set fresh = picks | selectattr('status', 'equalto', 'new') | list %}
         <div class="write-flow">
+            {% if cur_site.can_research %}
             <section class="wf-block">
                 <header class="wf-head">
                     <b>키워드</b>
-                    <span>{{ chips.all | length }}개 중 고르면 주제를 찾아와요</span>
+                    <span>{% if chips.by_category %}카테고리별 일본어 · {% endif %}{{ chips.all | length }}개 중 고르면 주제를 찾아와요</span>
                 </header>
                 <form method="post" action="{{ url_for('site_write_research') }}" class="wf-form" id="seed-form">
+                    {% if chips.by_category %}
+                    <div class="seed-cats" data-max="20">
+                        {% for g in pick_groups or [] %}
+                        {% set rows = chips.by_category.get(g.category) or [] %}
+                        <div class="seed-cat">
+                            <h3 class="pick-cat-h"><span>{{ g.label }}</span><small>{{ g.category }} · {{ rows | length }}개</small></h3>
+                            <div class="chips seed-chips">
+                                {% for w in rows %}
+                                <label class="chip-check"><input type="checkbox" name="seed" value="{{ w }}"{% if w in chips.checked %} checked{% endif %}><span>{{ w }}</span></label>
+                                {% else %}
+                                <p class="hint">키워드 없음</p>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
                     <div class="chips seed-chips" data-max="20">
                         {% for w in chips.all %}
                         <label class="chip-check"><input type="checkbox" name="seed" value="{{ w }}"{% if w in chips.checked %} checked{% endif %}><span>{{ w }}</span></label>
@@ -230,18 +244,84 @@
                         <p class="hint">시드 키워드가 없어요.</p>
                         {% endfor %}
                     </div>
+                    {% endif %}
                     <div class="wf-row">
                         {{ go("research", "주제 찾기 맡기기", quiet=True) }}
                     </div>
                 </form>
             </section>
+            {% elif cur_site.content == "companydb" %}
+            <section class="wf-block">
+                <header class="wf-head">
+                    <b>회사 찾기</b>
+                    <span>맡기면 기획팀이 추가할 회사를 골라 대기열에 넣어요</span>
+                </header>
+                <form method="post" action="{{ url_for('site_write_queue') }}" class="wf-form" id="cdb-queue-form">
+                    <div class="wf-row">
+                        {{ go("queue", "기획팀에게 회사 찾기 맡기기", quiet=True) }}
+                    </div>
+                </form>
+            </section>
+            {% endif %}
 
             <section class="wf-block">
                 <header class="wf-head">
                     <b>맡길 {{ cur_site.words.picks }}</b>
-                    <span>{% if fresh %}{{ fresh | length }}개 · 최대 15{{ cur_site.words.unit }}{% else %}리서치·분석 추천이 여기 모여요{% endif %}</span>
+                    <span>{% if pick_groups %}카테고리별 · 리서치만 · 최대 15{{ cur_site.words.unit }}{% elif fresh %}{{ fresh | length }}개 · 최대 15{{ cur_site.words.unit }}{% elif not cur_site.can_research %}대기열·분석 추천이 여기 모여요{% else %}리서치·분석 추천이 여기 모여요{% endif %}</span>
                 </header>
                 <form method="post" action="{{ url_for('site_write_picks') }}" id="picks-form">
+                    {% if pick_groups %}
+                        {% set ns = namespace(n=0, any=false) %}
+                        {% for g in pick_groups %}{% if g.picks %}{% set ns.any = true %}{% endif %}{% endfor %}
+                        {% if ns.any %}
+                        <div class="wf-go">
+                            <button type="button" class="act ghost" id="pick-all">모두 고르기</button>
+                            {{ go("write", "기획팀에게 " ~ cur_site.words.verb ~ " 맡기기", quiet=True) }}
+                        </div>
+                        {% endif %}
+                        <div class="pick-cats">
+                        {% for g in pick_groups %}
+                            <div class="pick-cat{% if not g.picks %} is-empty{% endif %}">
+                                <h3 class="pick-cat-h"><span>{{ g.label }}</span><small>{{ g.category }} · {% if g.picks %}{{ g.picks | length }}개{% else %}없음{% endif %}</small></h3>
+                                {% if g.picks %}
+                                <ul class="pick checks">
+                                    {% for p in g.picks %}
+                                    {% set ns.n = ns.n + 1 %}
+                                    <li><label>
+                                        <input type="checkbox" name="pick" value="{{ p.id }}"{% if ns.n <= 3 %} checked{% endif %}>
+                                        <span><b>{{ p.topic }}</b></span>
+                                    </label></li>
+                                    {% endfor %}
+                                </ul>
+                                {% else %}
+                                <p class="pick-cat-empty">추가할 주제 없음</p>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                        </div>
+                        {% if not ns.any %}
+                        <p class="hint">아직 {{ cur_site.words.picks | josa('이/가') }} 없어요. 위에서 주제 찾기를 맡겨 주세요.</p>
+                        {% endif %}
+                        {% if ba_ja_pending is defined %}
+                        <div class="pick-cat pick-cat-ja{% if not ba_ja_pending %} is-empty{% endif %}">
+                            <h3 class="pick-cat-h"><span>Business Analysis (일본어화)</span><small>영문 초안 → 일문 · {% if ba_ja_pending %}{{ ba_ja_pending | length }}편{% else %}없음{% endif %}</small></h3>
+                            {% if ba_ja_pending %}
+                            <form method="post" action="{{ url_for('site_action', aid='ba_ja') }}" class="wf-form" id="ba-ja-form">
+                                <div class="wf-go">
+                                    {{ go("ba_ja", "기획팀에게 BA 일본어화 맡기기", quiet=True) }}
+                                </div>
+                                <ul class="pick checks">
+                                    {% for row in ba_ja_pending %}
+                                    <li class="pick-readonly"><span><b>{{ row.title }}</b><em><i class="tag">lang: en</i></em></span></li>
+                                    {% endfor %}
+                                </ul>
+                            </form>
+                            {% else %}
+                            <p class="pick-cat-empty">일본어로 옮길 영어 초안 없음 · 위에서 BA(영문)을 먼저 써요</p>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    {% else %}
                     {% if fresh %}
                     <div class="wf-go">
                         <button type="button" class="act ghost" id="pick-all">모두 고르기</button>
@@ -257,9 +337,10 @@
                             </span>
                         </label></li>
                         {% else %}
-                        <li class="empty">아직 {{ cur_site.words.picks | josa('이/가') }} 없어요. 위에서 주제 찾기를 맡겨 주세요.</li>
+                        <li class="empty">{% if not cur_site.can_research %}아직 추가할 회사가 없어요. 위에서 회사 찾기를 맡겨 주세요.{% else %}아직 {{ cur_site.words.picks | josa('이/가') }} 없어요. 위에서 주제 찾기를 맡겨 주세요.{% endif %}</li>
                         {% endfor %}
                     </ul>
+                    {% endif %}
                 </form>
             </section>
         </div>
@@ -369,6 +450,7 @@
         <form method="post" action="{{ url_for('site_image_replace') }}" enctype="multipart/form-data" id="own-form">
             <input type="hidden" name="name" id="own-name">
         </form>
+        <form method="post" action="{{ url_for('site_image_cleanup') }}" id="cleanup-form"></form>
         {% set yt_noun = (cur_site.youtube.noun if cur_site.youtube_on else '') or '장소' %}
         <div class="write-flow" id="design-flow"{% if cur_site.youtube_on %} data-has-yt="1"{% endif %}>
             {% if cur_site.youtube_on %}
@@ -449,6 +531,9 @@
             <button type="button" class="act ghost" id="img-ai-open" disabled{% if not can_ai %} hidden{% endif %}>AI로 그리기</button>
             <label class="act ghost img-own" id="own-file">내 파일
                 <input type="file" accept="image/*" form="own-form" name="file" disabled onchange="this.form.requestSubmit()"></label>
+            {% if imgs.unused %}
+            {{ go("images", "안 쓰는 이미지 정리 · " ~ imgs.unused ~ "개", quiet=True, btn_form="cleanup-form") }}
+            {% endif %}
         </div>
         {% if cur_site.youtube_on %}
         <div class="img-actions sticky-go yt-actions" id="yt-actions" data-design-sticky="youtube" hidden>
@@ -542,61 +627,7 @@
     {% elif step == "ship" %}
         {% set pr = flow.pr %}
         {% set open_pr = pr and not flow.merged %}
-        {% set st = ship_stage or {} %}
-        {% set review_busy = teams.dev | select('in', busy_ids) | list | length == teams.dev | length %}
         <div class="write-flow">
-            <section class="wf-block">
-                <header class="wf-head">
-                    <b>반영</b>
-                    <span>{{ st.floor_label or cur_office.floor_label }} 자동 진행이 기본 · 막히거나 껐을 때만 버튼</span>
-                </header>
-                <div class="ship-now">
-                    <p class="ship-now-label">{% if st.key == "check" %}✅ {{ st.label }}
-                    {% elif st.key == "stuck" %}<span class="warn">{{ st.label }}</span>
-                    {% elif st.key and st.key != "idle" %}{{ st.label }}
-                    {% else %}올릴 변경 없음{% endif %}</p>
-                    {% if st.detail %}<p class="hint">{{ st.detail }}</p>{% endif %}
-                    {% if open_pr and pr %}<p class="ship-pr"><a href="{{ pr.url }}" target="_blank" rel="noopener">PR #{{ pr.number }}</a>{% if site.git.branch %} · {{ site.git.branch }}{% endif %}</p>{% endif %}
-                    {% if site.git.owner_wip %}<p class="hint warn">사장님 WIP {{ site.git.owner_wip|length }}개 · PR·배포 멈춤</p>{% endif %}
-                    {% if flow.review and open_pr and flow.reviewed %}
-                    <details class="ship-review {{ 'ok' if flow.verdict_ok else 'bad' }}"><summary>리뷰 {% if flow.verdict_ok %}통과{% else %}지적{% endif %}</summary><pre>{{ flow.review }}</pre></details>
-                    {% endif %}
-                    <div class="ship-now-actions">
-                        <form method="post" action="{{ url_for('site_autoship') }}" class="ss-auto" data-auto data-floor-label="{{ st.floor_label or cur_office.floor_label }}">
-                            <input type="hidden" name="on" value="{{ '0' if st.auto else '1' }}">
-                            <button type="submit" class="f3-toggle{% if st.auto %} on{% endif %}" title="{{ st.floor_label or cur_office.floor_label }} 전체 · PR·리뷰·머지·배포"><span></span>{{ st.floor_label or cur_office.floor_label }} 자동 진행 {{ '켬' if st.auto else '끔' }}</button>
-                        </form>
-                        {% if st.key == "check" %}
-                        <form method="post" action="{{ url_for('site_checked') }}" class="inline-form"><button class="act ghost small" type="submit">확인했어요</button></form>
-                        {% if st.url %}<a class="act ghost small" href="{{ st.url }}" target="_blank" rel="noopener">사이트 열기</a>{% endif %}
-                        {% endif %}
-                        {% if not st.auto or st.key == "stuck" %}
-                        <span class="ship-manual">
-                            {% if st.key == "changes" or (site.git.dirty and not open_pr) %}
-                            <form method="post" action="{{ url_for('site_ship_issue') }}" class="inline-form"><button class="act ghost small" type="submit"{% if site.git.owner_wip %} disabled{% endif %}>PR 만들기</button></form>
-                            {% endif %}
-                            {% if open_pr and not flow.reviewed %}
-                            <form method="post" action="{{ url_for('site_ship_review') }}" class="inline-form"><button class="act ghost small" type="submit">리뷰</button></form>
-                            {% endif %}
-                            {% if open_pr and flow.reviewed and flow.verdict_ok and not flow.merged %}
-                            <form method="post" action="{{ url_for('site_ship_merge') }}" class="inline-form"><button class="act ghost small" type="submit">머지</button></form>
-                            {% endif %}
-                            {% if open_pr and flow.reviewed and not flow.verdict_ok %}
-                            <form method="post" action="{{ url_for('site_ship_fix') }}" class="inline-form"><button class="act ghost small" type="submit">지적 고치기</button></form>
-                            <form method="post" action="{{ url_for('site_ship_merge') }}" class="inline-form"><button class="act ghost small" type="submit">그래도 머지</button></form>
-                            {% endif %}
-                            {% if flow.merged and not flow.deployed %}
-                            <form method="post" action="{{ url_for('site_ship_run') }}" class="inline-form"><button class="act ghost small" type="submit">올리기</button></form>
-                            {% endif %}
-                            {% if open_pr and not st.auto %}
-                            <form method="post" action="{{ url_for('site_ship_push') }}" class="inline-form"><button class="act ghost small" type="submit">푸시</button></form>
-                            {% endif %}
-                        </span>
-                        {% endif %}
-                    </div>
-                </div>
-            </section>
-
             <section class="wf-block">
                 <header class="wf-head">
                     <b>소스 정리</b>
@@ -743,33 +774,6 @@
         toastT = setTimeout(() => { toast.hidden = true; }, ok ? 3500 : 6000);
     }
     window.hqSay = say;
-    document.querySelectorAll("form[data-auto]").forEach((f) => f.addEventListener("submit", async (ev) => {
-        ev.preventDefault();
-        const on = f.querySelector('[name="on"]').value === "1";
-        let out = null;
-        try { out = await fetch(f.action, { method: "POST", body: new FormData(f), headers: { "X-Requested-With": "fetch" } }).then((r) => r.json()); } catch (_) {}
-        if (!out) return say("바꾸지 못했어요", false);
-        say(out.msg, true);
-        const b = f.querySelector("button");
-        const fl = f.getAttribute("data-floor-label") || (out && out.floor_label) || "";
-        const label = (fl ? fl + " " : "") + "자동 진행 " + (on ? "켬" : "끔");
-        b.classList.toggle("on", on); b.lastChild.textContent = label;
-        f.querySelector('[name="on"]').value = on ? "0" : "1";
-        // Same floor toggles elsewhere (header · 상세) stay in sync
-        document.querySelectorAll("form[data-auto]").forEach((other) => {
-            if (other === f) return;
-            const oFl = other.getAttribute("data-floor-label") || "";
-            if (fl && oFl && oFl !== fl) return;
-            if (out && out.office && other.dataset.office && other.dataset.office !== out.office) return;
-            const ob = other.querySelector("button");
-            const oh = other.querySelector('[name="on"]');
-            if (!ob || !oh) return;
-            ob.classList.toggle("on", on);
-            const ofl = other.getAttribute("data-floor-label") || fl;
-            ob.lastChild.textContent = (ofl ? ofl + " " : "") + "자동 진행 " + (on ? "켬" : "끔");
-            oh.value = on ? "0" : "1";
-        });
-    }));
     document.addEventListener("submit", async (ev) => {
         const form = ev.target;
         if (ev.defaultPrevented || !(form instanceof HTMLFormElement) || (form.method || "").toLowerCase() !== "post") return;
@@ -833,7 +837,61 @@
         }
         const tabs = pop.querySelector(".sp-floor-tabs");
         pick(floor || (tabs && tabs.dataset.here) || "");
+        async function reloadStaff() {
+            try { pop.innerHTML = await fetch(document.getElementById("staff-btn").dataset.url).then((r) => r.text()); }
+            catch (_) { return; }
+            pick(floor || (pop.querySelector(".sp-floor-tabs") || {}).dataset?.here || "");
+            wireStaff(pop);
+        }
+        function wireStaff(root) {
+            const box = root.querySelector("[data-staff-root]");
+            if (!box) return;
+            const msg = box.querySelector("[data-staff-msg]");
+            let hireOffice = (box.querySelector("[data-hire-office] .sp-chip.on") || {}).dataset?.office || "playground";
+            let hireTeam = (box.querySelector("[data-hire-team] .sp-chip.on") || {}).dataset?.team || "";
+            async function post(url, body) {
+                const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+                return r.json();
+            }
+            function show(out) {
+                if (!msg) return;
+                msg.hidden = false;
+                msg.textContent = (out && out.message) || "";
+                msg.classList.toggle("bad", !(out && out.ok));
+            }
+            function wireChips(sel, key, setVal) {
+                box.querySelectorAll(sel + " .sp-chip").forEach((b) => b.addEventListener("click", (ev) => {
+                    ev.stopPropagation();
+                    box.querySelectorAll(sel + " .sp-chip").forEach((x) => x.classList.toggle("on", x === b));
+                    setVal(b.dataset[key]);
+                }));
+            }
+            wireChips("[data-hire-office]", "office", (v) => { hireOffice = v; });
+            wireChips("[data-hire-team]", "team", (v) => { hireTeam = v; });
+            box.querySelector("[data-staff-hire]")?.addEventListener("click", async (ev) => {
+                ev.stopPropagation();
+                if (!hireTeam) { show({ ok: false, message: "팀을 골라 주세요" }); return; }
+                show(await post(box.dataset.hire, { team: hireTeam, office: hireOffice }));
+                await reloadStaff();
+            });
+            box.querySelector("[data-staff-fire]")?.addEventListener("click", async (ev) => {
+                ev.stopPropagation();
+                show(await post(box.dataset.fire));
+                await reloadStaff();
+            });
+            box.querySelectorAll("[data-staff-approve]").forEach((b) => b.addEventListener("click", async (ev) => {
+                ev.stopPropagation();
+                show(await post(box.dataset.approve, { id: b.dataset.staffApprove }));
+                await reloadStaff();
+            }));
+            box.querySelectorAll("[data-staff-reject]").forEach((b) => b.addEventListener("click", async (ev) => {
+                ev.stopPropagation();
+                show(await post(box.dataset.reject, { id: b.dataset.staffReject }));
+                await reloadStaff();
+            }));
+        }
         pop.onclick = (ev) => { const b = ev.target.closest("[data-sp-floor]"); if (b) pick(b.dataset.spFloor); };
+        wireStaff(pop);
     });
     wirePop("usage-btn", "usage-pop");
     void staffPop;
@@ -984,6 +1042,75 @@
             document.querySelectorAll("#su-card [data-su-tl]").forEach((x) => { x.hidden = x.dataset.suTl !== i; });
         }
     });
+})();
+(function () {
+    // 🤝 어학원 제휴 메일 (JP/KR Campus 현황): lazy card → 팝업 · 필터 다시 받기
+    function psLoad(url, reopen) {
+        const card = document.getElementById("ps-card");
+        if (!card) return;
+        fetch(url).then((r) => r.text()).then((html) => {
+            const box = document.createElement("div");
+            box.innerHTML = html.trim();
+            const next = box.querySelector("#ps-card");
+            if (!next) return;
+            const old = document.getElementById("ps-dlg");
+            if (old && old.open) old.close();
+            document.getElementById("ps-card").replaceWith(next);
+            const dlg = document.getElementById("ps-dlg");
+            if (reopen && dlg && dlg.showModal) dlg.showModal();
+        }).catch(() => {
+            const b = card.querySelector("[data-ps-open]");
+            if (b) { b.disabled = false; b.title = "불러오지 못했어요. 새로고침해 보세요."; }
+        });
+    }
+    function psQs(mail) {
+        const q = new URLSearchParams();
+        q.set("has_email", mail || "");
+        return "?" + q.toString();
+    }
+    document.addEventListener("click", async (ev) => {
+        const t = ev.target;
+        if (!(t instanceof Element) || !t.closest("#ps-card, #ps-dlg")) return;
+        const dlg = document.getElementById("ps-dlg");
+        if (t.closest("[data-ps-open]") && dlg) { dlg.showModal(); return; }
+        if (t.closest("[data-ps-close]") && dlg) { dlg.close(); return; }
+        if (t === dlg) { dlg.close(); return; }
+        const f = t.closest("[data-ps-mail]");
+        if (f && f.hasAttribute("data-ps-mail")) {
+            const base = document.getElementById("ps-card").dataset.url;
+            psLoad(base + psQs(f.dataset.psMail), true);
+            return;
+        }
+        const go = t.closest("[data-ps-collect]");
+        if (go && !go.disabled) {
+            const card = document.getElementById("ps-card");
+            const url = (card && card.dataset.collectUrl) || "";
+            if (!url) return;
+            go.disabled = true;
+            let out = null;
+            try {
+                out = await fetch(url, { method: "POST", headers: { "X-Requested-With": "fetch" } }).then((r) => r.json());
+            } catch (_) {}
+            if (typeof window.hqSay === "function") window.hqSay((out && out.msg) || "요청에 실패했어요", !!(out && out.ok));
+            const base = card.dataset.url;
+            const mail = card.dataset.hasEmail || "";
+            psLoad(base + psQs(mail), true);
+            return;
+        }
+        const c = t.closest("[data-ps-copy]");
+        if (c) {
+            const v = c.getAttribute("data-ps-copy") || "";
+            navigator.clipboard.writeText(v).then(() => {
+                c.textContent = "됨";
+                setTimeout(() => { c.textContent = "복사"; }, 1200);
+            }).catch(() => { c.textContent = "실패"; });
+        }
+    });
+    const card = document.getElementById("ps-card");
+    if (card && card.dataset.stale) {
+        const go = () => psLoad(card.dataset.url, false);
+        if (typeof requestIdleCallback === "function") requestIdleCallback(go, { timeout: 1500 }); else setTimeout(go, 0);
+    }
 })();
 (function () {
     // 한눈에: 콘텐츠 숫자 · 대기/멈춤 큐 팝업 (+ 지금 시작)
@@ -1200,33 +1327,75 @@
         if (autoPick) pickVisible();
         else sync();
     });
-    // Picks: count on the submit button, max 15.
-    const pf = document.getElementById("picks-form");
-    if (pf) {
-        const boxes = [...pf.querySelectorAll('input[name="pick"]:not([disabled])')];
-        const btn = pf.querySelector('button[type="submit"]');
-        const label = btn ? btn.textContent.trim() : "";
-        const sync = () => {
-            const on = boxes.filter((b) => b.checked).length;
-            boxes.forEach((b) => { b.disabled = !b.checked && on >= 15; });
-            if (btn) { btn.textContent = `${label} (${on}{{ cur_site.words.unit }})`; btn.disabled = on === 0; }
-        };
-        boxes.forEach((b) => b.addEventListener("change", sync));
-        const all = document.getElementById("pick-all");
-        if (all) all.addEventListener("click", () => { boxes.slice(0, 15).forEach((b) => { b.checked = true; }); sync(); });
-        sync();
+    // Picks · seed chips (re-bound after soft-refresh of .write-flow when research/write ends).
+    const PICK_UNIT = {{ cur_site.words.unit | tojson }};
+    const WRITE_URL = {{ (url_for('site_write') if step == 'write' else '') | tojson }};
+    const HERE_SITE = {{ cur_site.id | tojson }};
+    const MEET_URL = {{ url_for('site_meet') | tojson }};
+    function wireWriteFlow(root) {
+        const scope = root || document;
+        const pf = scope.querySelector("#picks-form");
+        if (pf && !pf.dataset.wired) {
+            pf.dataset.wired = "1";
+            const boxes = [...pf.querySelectorAll('input[name="pick"]:not([disabled])')];
+            const btn = pf.querySelector('button[type="submit"]');
+            const label = btn ? btn.textContent.trim().replace(/\s*\(\d+.*?\)\s*$/, "") : "";
+            const sync = () => {
+                const on = boxes.filter((b) => b.checked).length;
+                boxes.forEach((b) => { b.disabled = !b.checked && on >= 15; });
+                if (btn) { btn.textContent = `${label} (${on}${PICK_UNIT})`; btn.disabled = on === 0; }
+            };
+            boxes.forEach((b) => b.addEventListener("change", sync));
+            const all = scope.querySelector("#pick-all");
+            if (all) all.addEventListener("click", () => { boxes.slice(0, 15).forEach((b) => { b.checked = true; }); sync(); });
+            sync();
+        }
+        const seedRoots = [
+            ...scope.querySelectorAll(".seed-cats[data-max]"),
+            ...scope.querySelectorAll(".seed-chips[data-max]"),
+        ];
+        seedRoots.forEach((box) => {
+            if (box.dataset.wired) return;
+            box.dataset.wired = "1";
+            const max = Math.max(1, parseInt(box.dataset.max || "8", 10) || 8);
+            const boxes = [...box.querySelectorAll('input[name="seed"]')];
+            const sync = () => {
+                const on = boxes.filter((b) => b.checked).length;
+                boxes.forEach((b) => { b.disabled = !b.checked && on >= max; });
+            };
+            boxes.forEach((b) => b.addEventListener("change", sync));
+            sync();
+        });
     }
-    // Seed keywords: pick at most data-max from the pool.
-    document.querySelectorAll(".seed-chips[data-max]").forEach((box) => {
-        const max = Math.max(1, parseInt(box.dataset.max || "8", 10) || 8);
-        const boxes = [...box.querySelectorAll('input[name="seed"]')];
-        const sync = () => {
-            const on = boxes.filter((b) => b.checked).length;
-            boxes.forEach((b) => { b.disabled = !b.checked && on >= max; });
-        };
-        boxes.forEach((b) => b.addEventListener("change", sync));
-        sync();
-    });
+    wireWriteFlow(document);
+    let writeRefreshTimer = null;
+    let writeRefreshing = false;
+    async function refreshWriteFlow() {
+        if (!WRITE_URL || writeRefreshing) return false;
+        const flow = document.querySelector(".write-flow");
+        if (!flow) return false;
+        writeRefreshing = true;
+        try {
+            const html = await fetch(WRITE_URL, { headers: { "X-Requested-With": "fetch" } }).then((r) => r.text());
+            const next = new DOMParser().parseFromString(html, "text/html").querySelector(".write-flow");
+            if (!next) return false;
+            flow.replaceWith(next);
+            wireWriteFlow(document);
+            return true;
+        } catch (_) {
+            return false;
+        } finally {
+            writeRefreshing = false;
+        }
+    }
+    function scheduleWriteRefresh() {
+        if (!WRITE_URL || !document.querySelector(".write-flow")) return Promise.resolve(false);
+        return new Promise((resolve) => {
+            clearTimeout(writeRefreshTimer);
+            writeRefreshTimer = setTimeout(async () => { resolve(await refreshWriteFlow()); }, 400);
+        });
+    }
+    document.addEventListener("write:refresh", () => { scheduleWriteRefresh(); });
     // Images: gallery pick · bottom actions (후보 / AI / 내 파일). No preview panel.
     document.querySelectorAll("[data-img-pick]").forEach((root) => {
         const page = Math.max(10, parseInt(root.dataset.page || "30", 10) || 30);
@@ -1464,6 +1633,8 @@
         const all = (ev.detail || {}).jobs;
         if (!all || !list) return;
         let finished = false;
+        let softWrite = false;
+        let meetGo = "";
         for (const role in all) {
             const j = all[role];
             let li = list.querySelector(`li[data-role="${role}"]`);
@@ -1499,10 +1670,31 @@
                     ico.hidden = false;
                 }
             }
-            if (was[role] && !j.running) finished = true;
+            if (was[role] && !j.running) {
+                finished = true;
+                // Research/write result lives in the open write drawer — refresh that panel only (no full reload).
+                const task = j.task || "";
+                if ((task === "research" || task === "write" || task === "queue")
+                    && (!j.site || j.site === HERE_SITE)
+                    && WRITE_URL && document.querySelector(".write-flow")) {
+                    softWrite = true;
+                }
+                // 회의 끝 → 회의 결과 페이지로 (같은 사이트에서 연 회의만)
+                if (!meetGo && task.startsWith("meeting") && j.result_id
+                    && (!j.site || j.site === HERE_SITE)) {
+                    meetGo = MEET_URL + (MEET_URL.indexOf("?") >= 0 ? "&" : "?")
+                        + "proposal=" + encodeURIComponent(j.result_id);
+                }
+            }
             was[role] = !!j.running;
         }
-        if (finished && fresh) fresh.hidden = false;
+        if (meetGo) {
+            location.href = meetGo;
+        } else if (finished && softWrite) {
+            scheduleWriteRefresh().then((ok) => { if (!ok && fresh) fresh.hidden = false; });
+        } else if (finished && fresh) {
+            fresh.hidden = false;
+        }
     });
     // 회의 제안 → 실행 큐
     document.querySelectorAll(".idea-form").forEach((form) => {

@@ -1,6 +1,16 @@
 {# Shared office map. Needs: office. Optional: here (step id to highlight), focus_role / focus_label (client-side "editing with" seat). #}
 {% from "_chibi.html" import chibi %}
-<div class="office-map{% if office.floor %} has-floor{% endif %} floor-{{ office.floor_no or 1 }}" id="office-map" data-focus="{{ focus_role or '' }}" data-focus-label="{{ focus_label or '' }}">
+{% if office.hours_notice %}
+<p class="office-hours-banner" id="office-hours-banner" role="status">{{ office.hours_notice }}</p>
+{% else %}
+<p class="office-hours-banner" id="office-hours-banner" role="status" hidden></p>
+{% endif %}
+{% if office.vacation_notice %}
+<p class="office-vac-note" id="office-vac-note" role="status">{{ office.vacation_notice }}</p>
+{% else %}
+<p class="office-vac-note" id="office-vac-note" role="status" hidden></p>
+{% endif %}
+<div class="office-map{% if office.floor %} has-floor{% endif %} floor-{{ office.floor_no or 1 }}{% if office.hours_notice %} off-hours{% endif %}" id="office-map" data-focus="{{ focus_role or '' }}" data-focus-label="{{ focus_label or '' }}">
     {% if office.floor %}<img class="floor-img" src="{{ url_for('static', filename=office.floor) }}" alt="" aria-hidden="true">{% endif %}
     {% if office.floor_front %}<img class="floor-front" src="{{ url_for('static', filename=office.floor_front) }}" alt="" aria-hidden="true">{% endif %}
     <div class="map-wall" aria-hidden="true"><span class="window"></span><span class="window"></span><span class="window"></span><span class="window"></span></div>
@@ -15,13 +25,14 @@
         <span class="plant"></span>
     </div>
     {% for plate in office.plates %}
-    <div class="desk team-plate tone-{{ plate.team }}{% if here == plate.step %} here{% endif %}{% if plate.busy %} busy{% endif %}" data-team="{{ plate.team }}" style="left:{{ plate.x }}%;top:{{ plate.y }}%" aria-hidden="true">
+    <div class="desk team-plate tone-{{ plate.team }}{% if here == plate.step %} here{% endif %}{% if plate.busy %} busy{% endif %}{% if plate.off_note %} off-note{% endif %}" data-team="{{ plate.team }}" style="left:{{ plate.x }}%;top:{{ plate.y }}%" aria-hidden="true">
         <span class="monitor"></span>
         <span class="desk-top"></span>
         <span class="desk-plate">
             <b>{{ plate.label }} <small>{{ plate.size }}명</small></b>
-            <em data-line>{{ plate.line }}</em>
+            <em data-line{% if plate.off_note %} hidden{% endif %}>{{ '' if plate.off_note else plate.line }}</em>
         </span>
+        <span class="off-quip" data-off-quip{% if not plate.off_note %} hidden{% endif %}>{{ plate.line if plate.off_note else '' }}</span>
     </div>
     {% endfor %}
     {% if office.floor_label %}<span class="floor-badge f{{ office.floor_no }}" aria-hidden="true">{{ office.floor_label }}</span>{% endif %}
@@ -331,10 +342,31 @@
             const el = map.querySelector(`.desk[data-team="${pl.team}"]`);
             if (!el) return;
             el.classList.toggle("busy", !!pl.busy);
+            el.classList.toggle("off-note", !!pl.off_note);
             const line = el.querySelector("[data-line]");
-            if (line) line.textContent = pl.line || "";
+            const quip = el.querySelector("[data-off-quip]");
+            if (pl.off_note) {
+                if (line) { line.textContent = ""; line.hidden = true; }
+                if (quip) { quip.textContent = pl.line || ""; quip.hidden = !(pl.line || "").trim(); }
+            } else {
+                if (quip) { quip.textContent = ""; quip.hidden = true; }
+                if (line) { line.hidden = false; line.textContent = pl.line || ""; }
+            }
         });
         if (data.boss) paintBoss(data.boss);
+        const vac = document.getElementById("office-vac-note");
+        if (vac) {
+            const msg = (office.vacation_notice || "").trim();
+            vac.textContent = msg;
+            vac.hidden = !msg;
+        }
+        const hours = document.getElementById("office-hours-banner");
+        if (hours) {
+            const msg = (office.hours_notice || "").trim();
+            hours.textContent = msg;
+            hours.hidden = !msg;
+        }
+        map.classList.toggle("off-hours", !!(office.hours_notice || "").trim());
         save();
         document.dispatchEvent(new CustomEvent("office:update", { detail: data }));
     }
