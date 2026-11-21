@@ -18,7 +18,67 @@ from urllib.parse import unquote, urlparse
 
 from app import sites
 KINDS = ("okpy_posts", "campus_guides", "companydb", "poi")
-OKPY_CATEGORIES = ("python", "cloud", "terraform", "eng-comms", "ai-models")
+# HQ 기획·쓰기로 새로 추가 가능한 okpy 카테고리만 (사이트에 폴더는 더 있어도 여기 없으면 추천·쓰기 안 함).
+# data-analysis = Business Analysis · 초안은 영어, 일본어화는 별 잡.
+OKPY_CATEGORIES = (
+    "python", "cloud", "terraform", "dev-method",
+    "data-analysis", "eng-comms", "ai-models", "career",
+)
+OKPY_ARCHIVE_ONLY = frozenset({"data-model", "pmbok", "agile-scrum", "fit-journey"})
+# Japanese Trends/write seeds per writable category (chip pool · research).
+OKPY_CATEGORY_SEEDS: dict[str, tuple[str, ...]] = {
+    "python": (
+        "Python ライブラリ", "FastAPI", "pandas", "NumPy", "Pydantic",
+    ),
+    "cloud": (
+        "AWS GCP Azure 比較", "Kubernetes", "Docker", "サーバレス 比較", "マネージド DB 比較",
+    ),
+    "terraform": (
+        "Terraform", "OpenTofu", "Terraform モジュール", "Terraform state", "IaC 比較",
+    ),
+    "dev-method": (
+        "開発方法論", "CI/CD", "テスト戦略", "コードレビュー", "オブザーバビリティ",
+    ),
+    "data-analysis": (
+        "A/Bテスト", "効果量", "統計的有意差", "実験設計", "メトリクス 設計",
+    ),
+    "eng-comms": (
+        "エンジニア コミュニケーション", "要件のすり合わせ", "ステークホルダー合意", "技術提案の伝え方",
+    ),
+    "ai-models": (
+        "LLM 比較", "Claude vs GPT", "プロンプトエンジニアリング", "Gemini 比較",
+    ),
+    "career": (
+        "エンジニア キャリア", "技術選定 キャリア", "シニアエンジニア", "転職 ポートフォリオ",
+    ),
+}
+
+
+def okpy_seed_keywords(limit: int = 20) -> list[str]:
+    """Round-robin JA seeds across OKPY_CATEGORIES (no archive / no KO·EN)."""
+    pool: list[str] = []
+    seen: set[str] = set()
+    lists = [list(OKPY_CATEGORY_SEEDS.get(c) or ()) for c in OKPY_CATEGORIES]
+    i = 0
+    while len(pool) < max(1, int(limit or 20)):
+        progressed = False
+        for rows in lists:
+            if i >= len(rows):
+                continue
+            w = str(rows[i]).strip()
+            key = w.lower()
+            if w and key not in seen:
+                seen.add(key)
+                pool.append(w)
+                progressed = True
+                if len(pool) >= limit:
+                    return pool
+            else:
+                progressed = True
+        if not progressed:
+            break
+        i += 1
+    return pool
 
 
 def kind() -> str:
@@ -68,6 +128,17 @@ def categories() -> tuple[str, ...]:
     return OKPY_CATEGORIES
 
 
+def resolve_write_category(category: str | None, topic: str) -> str:
+    """Normalize write category for the current kit (poi: guide-shaped topics → 가이드)."""
+    cats = categories()
+    if is_poi():
+        from app.content import poicontent
+        return poicontent.resolve_category(category, topic)
+    if category in cats:
+        return category
+    return cats[0] if cats else str(category or "")
+
+
 def write(work, category: str, topic: str, row: dict | None = None) -> dict[str, Any] | None:
     """Kit write path. None → okpy_posts; workers runs generate_posts."""
     k = kind()
@@ -103,7 +174,7 @@ def write_done(result: dict[str, Any]) -> str:
 def research_say(n_keywords: int) -> str:
     k = kind()
     if k == "companydb":
-        return f"키워드 {n_keywords}개로 추가할 회사 고르는 중"
+        return "추가할 회사 고르는 중"
     if k == "poi":
         from app.content import poicontent
         return f"키워드 {n_keywords}개로 추가할 {poicontent.kit().noun_ko}·가이드 고르는 중"
@@ -119,7 +190,11 @@ def research_picks(keywords: list[dict[str, Any]], n_topics: int, claude_json) -
     k = kind()
     if k == "companydb":
         from app.content import cdbcontent
-        return cdbcontent.picks_from(claude_json(cdbcontent.research_prompt(keywords, n_topics), timeout_sec=300, model=MODEL_HEAVY) or {})
+        picks = cdbcontent.picks_from(
+            claude_json(cdbcontent.research_prompt(keywords, n_topics), timeout_sec=300, model=MODEL_HEAVY) or {},
+            n=n_topics,
+        )
+        return cdbcontent.fill_market_gaps(picks, keywords, n_topics, claude_json, MODEL_HEAVY)
     if k == "poi":
         from app.content import poicontent
         return poicontent.picks_from(claude_json(poicontent.research_prompt(keywords, n_topics), timeout_sec=300, model=MODEL_HEAVY) or {})

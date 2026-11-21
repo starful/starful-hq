@@ -1,8 +1,51 @@
-{# 👥 사원 card — busy people full rows; idle = compact faces. Needs: floors, here. #}
+{# 👥 사원 card — busy people full rows; idle = compact faces. Needs: floors, here, staffing. #}
 {% from "_site_ico.html" import sico with context %}
 {% set total = floors | sum(attribute='count') %}{% set busy = floors | sum(attribute='busy') %}
-<header class="gp-head sp-head"><b>👥 사원</b><span class="gp-total">{{ total }}<small>명</small></span></header>
-<p class="sp-sum">지금 일하는 사람 <b class="{{ 'on' if busy }}">{{ busy }}명</b>{% if total > busy %} · 쉬는 {{ total - busy }}명{% endif %}</p>
+{% set st = staffing or {} %}
+<header class="gp-head sp-head"><b>👥 사원</b><span class="gp-total">{{ st.count or total }}<small>/{{ st.max or total }}</small></span></header>
+<p class="sp-sum">지금 일하는 사람 <b class="{{ 'on' if busy }}">{{ busy }}명</b>{% if total > busy %} · 쉬는 {{ total - busy }}명{% endif %}{% if st.open %} · 채용 가능 {{ st.open }}{% endif %}{% if st.vacancies %} · 빈자리 {{ st.vacancies }}{% endif %}</p>
+<div class="sp-staff" data-staff-root
+     data-hire="{{ url_for('staff_hire') }}"
+     data-fire="{{ url_for('staff_fire') }}"
+     data-approve="{{ url_for('staff_approve') }}"
+     data-reject="{{ url_for('staff_reject') }}">
+  <div class="sp-post">
+    <p class="sp-post-label">채용 공고</p>
+    <div class="sp-chips" data-hire-office>
+      {% for o in st.offices or [] %}
+      <button type="button" class="sp-chip{% if o.id == 'playground' %} on{% endif %}" data-office="{{ o.id }}">{{ o.label }}</button>
+      {% endfor %}
+    </div>
+    <div class="sp-chips" data-hire-team>
+      {% for t in st.teams or [] %}
+      <button type="button" class="sp-chip" data-team="{{ t.id }}">{{ t.label }}</button>
+      {% endfor %}
+    </div>
+    <div class="sp-staff-acts">
+      <button type="button" class="sp-act" data-staff-hire {% if not st.can_hire %}disabled title="정원 가득"{% endif %}>공고 올리기</button>
+      <button type="button" class="sp-act" data-staff-fire>해고 제안</button>
+    </div>
+  </div>
+  {% if st.pending %}
+  <ul class="sp-pending">
+    {% for p in st.pending %}
+    <li data-pending="{{ p.id }}">
+      {% if p.kind == 'hire' %}
+      <b>채용</b> · {{ p.candidate.name_en }} <small>{{ p.why }} · {{ p.candidate.title }}</small>
+      {% else %}
+      <b>해고</b> · {{ p.who_name }}{% if p.lead %} <em>★→ {{ p.successor_name or '후임' }}</em>{% endif %}
+      <small>{{ p.why }}</small>
+      {% endif %}
+      <span class="sp-pending-acts">
+        <button type="button" class="sp-ok" data-staff-approve="{{ p.id }}">확인</button>
+        <button type="button" class="sp-no" data-staff-reject="{{ p.id }}">거절</button>
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <p class="sp-staff-msg" data-staff-msg hidden></p>
+</div>
 <div class="sp-floor-tabs" data-here="{{ here }}">
     {% for f in floors | sort(attribute='floor') %}
     <button type="button" class="o-{{ f.id }}" data-sp-floor="{{ f.id }}"><i class="ss-floor">{{ f.floor_label }}</i>{{ f.name }} <small>{% if f.busy %}{{ f.busy }} 작업{% else %}{{ f.count }}명{% endif %}</small></button>

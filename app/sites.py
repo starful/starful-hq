@@ -107,6 +107,11 @@ class Site:
         return self.post_ext == ".md"
 
     @property
+    def can_research(self) -> bool:
+        """Keyword/Trends research → topic picks. CompanyDB only adds companies from the queue/analysis."""
+        return self.content != "companydb"
+
+    @property
     def icon(self) -> Path | None:
         """The site's own favicon (shown next to its jobs and events)."""
         for d in ("app/static/img", "app/static/images", "app/static", "static"):

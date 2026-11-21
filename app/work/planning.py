@@ -28,6 +28,19 @@ FOCUS = {
     "content": "콘텐츠 전략",
     "growth": "유입 채널 늘리기",
 }
+# B1 Task Force (SiteKPI): topic chips — TF staff only (no 1·2F leaders).
+TF_FOCUS = {
+    "all": "전체 (수익화 · 편의 · 기능)",
+    "money": "수익화 (플랜 · 결제 · 전환)",
+    "ux": "유저편의성 (온보딩 · 보드 UX · 첫 연결)",
+    "feature": "개발기능 (연결 · 지표 · 배포 · 기능)",
+}
+
+
+def focus_map(office_id: str | None = None) -> dict[str, str]:
+    """Meeting focus chips for this floor."""
+    oid = office_id or sites.current().office
+    return dict(TF_FOCUS) if oid == "basement" else dict(FOCUS)
 
 
 def _site_pages() -> dict[str, Any]:
@@ -202,8 +215,14 @@ def save(result: dict[str, Any], office: bool = False) -> str:
     result = {**result, "id": aid}
     folder = office_dir() if office else Path(PROPOSAL_DIR)
     folder.mkdir(parents=True, exist_ok=True)
-    marketing._write(folder / f"{aid}.json", result)
-    (folder / f"{aid}.md").write_text(markdown(result), encoding="utf-8")
+    path = folder / f"{aid}.json"
+    marketing._write(path, result)
+    if not marketing._read(path):  # rare: rewrite if the dated file did not parse
+        marketing._write(path, result)
+    md = folder / f"{aid}.md"
+    tmp_md = md.with_suffix(".md.tmp")
+    tmp_md.write_text(markdown(result), encoding="utf-8")
+    tmp_md.replace(md)
     if not office:
         marketing._write(PROPOSAL_PATH, result)
     return aid
@@ -217,6 +236,15 @@ def file_of(aid: str, ext: str = ".json") -> Path | None:
     return None
 
 
+def _heal_dated(path: Path) -> dict[str, Any]:
+    """If a dated proposal JSON is corrupt but proposals.json has the same id, rewrite and return it."""
+    latest = marketing._read(PROPOSAL_PATH)
+    if str(latest.get("id") or "") != path.stem:
+        return {}
+    marketing._write(path, latest)
+    return latest if marketing._read(path) else {}
+
+
 def read(aid: str = "") -> dict[str, Any]:
     """Load one proposal by id, or the newest (site or office) when aid is empty.
     If aid is given but the file is gone, return {} — do not fall back to another meeting
@@ -225,9 +253,12 @@ def read(aid: str = "") -> dict[str, Any]:
     if aid:
         path = file_of(aid)
         if path is not None:
-            data = marketing._read(path)
+            data = marketing._read(path) or _heal_dated(path)
             if data:
                 return data
+        latest = marketing._read(PROPOSAL_PATH)
+        if str(latest.get("id") or "") == aid:
+            return latest
         return {}
     latest = marketing._read(PROPOSAL_PATH)
     newest_office = sorted(office_dir().glob("*.json"))[-1:] if office_dir().is_dir() else []
@@ -240,7 +271,7 @@ def history(limit: int = 30) -> list[dict[str, Any]]:
     paths = [p for folder in _dirs() if folder.is_dir() for p in folder.glob("*.json")]
     out = []
     for path in sorted(paths, key=lambda p: p.stem, reverse=True)[:limit]:
-        data = marketing._read(path)
+        data = marketing._read(path) or _heal_dated(path)
         if data:
             out.append({"id": path.stem, "at": data.get("at") or path.stem, "headline": data.get("headline") or "",
                         "office": bool(data.get("office")),

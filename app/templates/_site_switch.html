@@ -24,6 +24,20 @@
                     <input type="hidden" name="on" value="{{ '0' if floor_on else '1' }}">
                     <button type="submit" class="f3-toggle{% if floor_on %} on{% endif %}" title="{{ off.floor_label }} 사이트 전부 · PR·리뷰·머지·배포"><span></span>{{ off.floor_label }} 자동 진행 {{ '켬' if floor_on else '끔' }}</button>
                 </form>
+                {% set mail = (office_partners_mail or {}).get(oid) %}
+                {% if mail %}
+                <div class="floor-mail" data-office="{{ oid }}">
+                    {% if mail.pending %}
+                    <button type="button" class="fm-mail-btn" disabled title="{{ mail.pending_label }}">{{ off.floor_label }} 메일 수집 · {{ mail.pending_label }}</button>
+                    {% elif mail.ok %}
+                    <button type="button" class="fm-mail-btn" data-floor-mail
+                            data-url="{{ url_for('office_partners_collect', office_id=oid) }}"
+                            title="{{ mail.why }}">{{ off.floor_label }} 메일 수집 맡기기</button>
+                    {% else %}
+                    <button type="button" class="fm-mail-btn" disabled title="{{ mail.why }}">{{ off.floor_label }} 메일 수집</button>
+                    {% endif %}
+                </div>
+                {% endif %}
             </div>
         </details>
         {% endfor %}
@@ -82,7 +96,6 @@
         paintBusy(office.sites_busy || []);
     });
 
-    // Floor autoship toggles (home + site header). Site pages also sync via site.html handler.
     nav.querySelectorAll("form.floor-auto[data-auto]").forEach((f) => {
         f.addEventListener("submit", async (ev) => {
             ev.preventDefault();
@@ -99,12 +112,9 @@
             if (window.hqSay) window.hqSay(out.msg, true);
             const fl = out.floor_label || f.getAttribute("data-floor-label") || "";
             const oid = out.office || f.dataset.office || "";
-            document.querySelectorAll("form[data-auto]").forEach((other) => {
+            document.querySelectorAll("form.floor-auto[data-auto]").forEach((other) => {
                 const oOid = other.dataset.office || "";
-                const oFl = other.getAttribute("data-floor-label") || "";
                 if (oid && oOid && oOid !== oid) return;
-                if (!oOid && fl && oFl && oFl !== fl) return;
-                if (!oOid && !oFl && other !== f) return;
                 const ob = other.querySelector("button");
                 const oh = other.querySelector('[name="on"]');
                 if (!ob || !oh) return;
@@ -114,6 +124,27 @@
                 oh.value = on ? "0" : "1";
             });
         });
+    });
+
+    nav.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("[data-floor-mail]");
+        if (!btn || btn.disabled || !nav.contains(btn)) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const url = btn.getAttribute("data-url") || "";
+        if (!url) return;
+        btn.disabled = true;
+        let out = null;
+        try {
+            out = await fetch(url, { method: "POST", headers: { "X-Requested-With": "fetch" } }).then((r) => r.json());
+        } catch (_) {}
+        if (window.hqSay) window.hqSay((out && out.msg) || "요청에 실패했어요", !!(out && out.ok));
+        if (out && out.ok) {
+            btn.textContent = (btn.textContent || "").replace("맡기기", "큐에 담김");
+            btn.removeAttribute("data-floor-mail");
+        } else {
+            btn.disabled = false;
+        }
     });
 })();
 </script>

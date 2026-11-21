@@ -82,6 +82,7 @@ def _ko(err: Any) -> str:
     """Turn common tool errors into one plain Korean line."""
     text = str(err or "").strip() or "알 수 없는 오류"
     low = text.lower()
+    first = text.splitlines()[0].strip() if text else ""
     if "gh not logged in" in low or "gh auth login" in low:
         return "GitHub 로그인이 필요해요. 터미널에서 gh auth login"
     if "gh cli not found" in low:
@@ -92,7 +93,16 @@ def _ko(err: Any) -> str:
         return "Claude CLI 로그인이 필요해요"
     if "gemini_api_key" in low:
         return "이미지용 GEMINI_API_KEY가 없어요 (okpy/.env)"
-    return text.splitlines()[0][:200]
+    if "returned no json" in low or "no json" in low:
+        return "Claude가 JSON을 주지 않았어요. 다시 맡겨 주세요"
+    # Model sometimes fails with a fenced dump; first line is literally ```json
+    if first.startswith("```") or first in ("json", "{", "["):
+        return "Claude 응답을 읽지 못했어요. 다시 맡겨 주세요"
+    if "on main" in low and "nothing to merge" in low:
+        return "이미 main이에요 · 열린 PR이 없어 리뷰·머지할 게 없어요"
+    if "no open pr" in low or "no pull requests" in low:
+        return "열린 PR이 없어요"
+    return first[:200]
 
 
 def _okpy_env() -> dict[str, str]:
@@ -318,7 +328,8 @@ def write_topics(work, items: list[list[str]]) -> str:
     _models_for_covers()
     done, failed = [], []
     for n, (category, topic) in enumerate(items, 1):
-        work.say(f"{n}/{len(items)}편 「{topic[:30]}」 쓰는 중")
+        category = contentkit.resolve_write_category(category, topic)
+        work.say(f"{n}/{len(items)}편 「{topic[:30]}」 ({category}) 쓰는 중")
         try:
             result = contentkit.write(work, category, topic)
             if result is None:
@@ -728,7 +739,7 @@ def _from_verdict(text: str) -> str:
     return (text or "").strip()
 
 
-MAX_FIX_ROUNDS = 2      # after this many fix → re-review rounds the PR is merged and leftovers become follow-ups
+MAX_FIX_ROUNDS = 2      # after this many fix → re-review rounds HQ stops and a person decides (never merges by itself)
 FOLLOWUPS_PATH = sites.data("followups.md")   # per site
 
 
@@ -797,6 +808,10 @@ def review_pr(work) -> str:
     tools.need("claude", "gh")
     flow = office.read_flow()
     number = (flow.get("pr") or {}).get("number")
+    if not number:
+        # Stale review after merge: pr_review(main) returns English "on main — nothing to merge"
+        synced = sync_merged_pr_from_github()
+        raise RuntimeError(synced or "열린 PR이 없어요 · 리뷰할 게 없습니다")
     rnd = int(flow.get("review_round") or 0)
     before = [str(x) for x in (flow.get("required") or [])]
     work.say("PR을 읽는 중" if not rnd else f"고친 PR을 다시 읽는 중 ({rnd}번째 수정)")
@@ -835,10 +850,10 @@ def review_pr(work) -> str:
     pr = flow.get("pr") or data.get("pr") or {}
     note = ""
     if not ok and rnd >= MAX_FIX_ROUNDS and not data.get("blockers"):
-        # enough rounds: merge now, keep what is left as follow-ups instead of looping forever
-        _save_followups(pr, required, f"{rnd}번 고친 뒤 남은 항목")
-        note = f"{rnd}번 고쳤어요 · 남은 {len(required)}개는 후속으로 남기고 머지해요"
-        ok = True
+        # enough rounds: stop and hand it to a person. Merging with required fixes left open
+        # is how okonsen/okcaddie lost their search traffic in November 2026.
+        _save_followups(pr, required, f"{rnd}번 고친 뒤 남은 항목 · 사람 확인 필요")
+        note = f"{rnd}번 고쳤어요 · 남은 {len(required)}개 때문에 머지를 멈췄어요. 사람이 확인해 주세요"
     _save_followups(pr, suggestions, "제안 (머지를 막지 않음)")
     office.write_flow(
         pr=pr if pr else None, reviewed=True, verdict_ok=ok, review=text + (f"\n\n※ {note}" if note else ""),
@@ -850,10 +865,19 @@ def review_pr(work) -> str:
     return "머지해도 좋아요" if ok else f"꼭 고칠 게 {len(required)}개 있어요"
 
 
+def _is_merge_conflict_err(err: str) -> bool:
+    low = (err or "").lower()
+    return any(x in low for x in (
+        "not mergeable", "merge conflict", "cannot be cleanly created",
+        "conflicting files", "must be resolved", "merge state dirty",
+    ))
+
+
 def merge_pr(work) -> str:
     _okadmin_import()
     from github_ops import merge_pr as gh_merge
     from github_ops import pr_for_branch
+    from github_ops import update_pr_branch
 
     tools.need("gh")
 
@@ -865,16 +889,62 @@ def merge_pr(work) -> str:
             number = ((found or {}).get("pr") or {}).get("number")
         if not number:
             raise RuntimeError("머지할 PR이 없어요")
+        from app.work import seo_guard
+        branch = str(flow.get("branch") or "").strip()
+        blockers = seo_guard.check_branch(_git, branch) if branch else []
+        if flow.get("required"):
+            blockers.insert(0, f"리뷰의 꼭 고칠 것 {len(flow.get('required'))}개가 아직 남아 있어요")
+        if blockers:
+            office.write_flow(verdict_ok=False, seo_blockers=blockers, seo_checked_at=snapshot.now_stamp())
+            raise RuntimeError("SEO 안전검사에서 머지를 막았어요: " + " / ".join(blockers)
+                               + " · 꼭 필요하면 GitHub에서 사람이 직접 머지해 주세요")
         work.say(f"PR #{number} 머지하는 중")
         result = gh_merge(OKPY, number=int(number))
         if not result.get("ok"):
             # already merged on GitHub (retry after a hang) — still sync local flow
             err = _ko(result.get("error"))
-            if "already merged" not in err.lower() and "merged" not in err.lower():
+            low = err.lower()
+            if "already merged" in low or ("merged" in low and "not mergeable" not in low
+                                           and "cannot be cleanly" not in low):
+                pass  # treat as success below
+            elif _is_merge_conflict_err(err):
+                # One shot: pull main into the PR head, then retry merge once.
+                work.say(f"PR #{number} 충돌 · main을 합쳐 보는 중")
+                upd = update_pr_branch(OKPY, number=int(number))
+                if upd.get("ok"):
+                    result = gh_merge(OKPY, number=int(number))
+                    if result.get("ok"):
+                        office.write_flow(merge_conflict=False, merge_conflict_detail="",
+                                          merge_conflict_at="")
+                        err = ""
+                    else:
+                        err = _ko(result.get("error"))
+                if err and _is_merge_conflict_err(err):
+                    tip = (upd.get("error") if isinstance(upd, dict) and not upd.get("ok") else err) or err
+                    office.write_flow(
+                        merge_conflict=True,
+                        merge_conflict_detail=str(tip)[:240],
+                        merge_conflict_at=snapshot.now_stamp(),
+                    )
+                    raise RuntimeError(
+                        f"PR #{number} 충돌 · 자동으로 못 맞춰요. 사람이 맞춘 뒤 다시 머지해 주세요 "
+                        f"({_ko(tip)[:120]})"
+                    )
+                if err:
+                    raise RuntimeError(err)
+            else:
                 raise RuntimeError(err)
         # mark merged before pull: local WIP / pull failure must not leave HQ thinking the PR is open
-        office.write_flow(merged=True, deployed=False, merged_at=snapshot.now_stamp(), then_common=False)
-        _git("checkout", "main")
+        office.write_flow(merged=True, deployed=False, merged_at=snapshot.now_stamp(), then_common=False,
+                          merge_conflict=False, merge_conflict_detail="", merge_conflict_at="")
+        # Dirty pages built during the PR often block checkout — same stash path as ensure_on_main.
+        if not ensure_on_main_if_idle():
+            sw = _git("checkout", "main")
+            if sw.returncode != 0:
+                sw = _git("checkout", "master")
+            if sw.returncode != 0:
+                return (f"PR #{number}을 머지했어요 · 로컬 main으로 못 갔어요 "
+                        f"({_ko(sw.stderr).strip()[:120] or 'dirty working tree'})")
         pulled = _git("pull", "--ff-only")
         if pulled.returncode != 0:
             return (f"PR #{number}을 머지했어요 · 로컬 main은 받아오지 못했어요 "
@@ -1125,6 +1195,9 @@ def ensure_on_main_if_idle() -> bool:
     Deploy and content jobs expect main. After an outside merge (or a leftover
     feat/ checkout), local HEAD often stays on the feature branch and every
     deploy fails with 「main에서만 올려요」 for days. Returns True if switched.
+
+    Dirty local files (company pages built while the PR was open) often block
+    checkout — stash them, switch, pull, then pop so we do not stay stuck.
     """
     flow = office.read_flow()
     if flow.get("pr") and not flow.get("merged"):
@@ -1132,13 +1205,47 @@ def ensure_on_main_if_idle() -> bool:
     cur = _git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     if cur in ("main", "master", "HEAD", ""):
         return False
-    sw = _git("checkout", "main")
+
+    def _checkout_prod():
+        """Try main then master. Return (ok_proc_or_last_fail, combined_err_text)."""
+        errs: list[str] = []
+        sw = _git("checkout", "main")
+        errs.append(_ko(sw.stderr) + " " + _ko(sw.stdout))
+        if sw.returncode == 0:
+            return sw, " ".join(errs)
+        sw2 = _git("checkout", "master")
+        errs.append(_ko(sw2.stderr) + " " + _ko(sw2.stdout))
+        return sw2, " ".join(errs)
+
+    sw, err_blob = _checkout_prod()
+    stashed = False
     if sw.returncode != 0:
-        sw = _git("checkout", "master")
-    if sw.returncode != 0:
-        print(f"ensure_on_main_if_idle: {_ko(sw.stderr)}", file=sys.stderr)
-        return False
+        err = err_blob.lower()
+        blocked = any(
+            s in err
+            for s in (
+                "local changes",
+                "would be overwritten",
+                "commit your changes",
+                "please commit",
+                "untracked working tree",
+            )
+        )
+        if blocked:
+            stash = _git("stash", "push", "-u", "-m", "hq: switch to main after merge")
+            if stash.returncode == 0 and "No local changes to save" not in (stash.stdout or ""):
+                stashed = True
+                sw, err_blob = _checkout_prod()
+        if sw.returncode != 0:
+            if stashed:
+                _git("stash", "pop")
+            print(f"ensure_on_main_if_idle: {_ko(sw.stderr) or err_blob.strip()}", file=sys.stderr)
+            return False
     _git("pull", "--ff-only")
+    if stashed:
+        pop = _git("stash", "pop")
+        if pop.returncode != 0:
+            print(f"ensure_on_main_if_idle stash pop: {_ko(pop.stderr)}", file=sys.stderr)
     return True
 
 
@@ -1168,7 +1275,8 @@ def sync_merged_pr_from_github() -> str | None:
         # Deleted branch / unknown PR after squash-merge — treat as merged when branch is gone
         err = (proc.stderr or proc.stdout or "").lower()
         if "could not find" in err or "not found" in err or "no pull requests" in err:
-            office.write_flow(merged=True, deployed=False, merged_at=snapshot.now_stamp(), then_common=False)
+            office.write_flow(merged=True, deployed=False, merged_at=snapshot.now_stamp(), then_common=False,
+                              merge_conflict=False, merge_conflict_detail="", merge_conflict_at="")
             ensure_on_main_if_idle()
             return f"PR #{number}을 찾지 못했어요(이미 머지·삭제된 듯) · 배포 차례로 넘길게요"
         return None
@@ -1178,7 +1286,8 @@ def sync_merged_pr_from_github() -> str | None:
         return None
     if str(data.get("state") or "").upper() != "MERGED" and not data.get("mergedAt"):
         return None
-    office.write_flow(merged=True, deployed=False, merged_at=snapshot.now_stamp(), then_common=False)
+    office.write_flow(merged=True, deployed=False, merged_at=snapshot.now_stamp(), then_common=False,
+                      merge_conflict=False, merge_conflict_detail="", merge_conflict_at="")
     ensure_on_main_if_idle()
     return f"PR #{number}은 이미 머지됐어요 · 배포 차례로 넘길게요"
 
@@ -1231,16 +1340,18 @@ def _pr_has_posts(flow: dict) -> bool:
 
 def start_fix_for_review(_from: str = "") -> tuple[str | None, str]:
     """Hand open-PR review fixes to the right team. Returns (who, kind) where kind is
-    fix_code | fix | merge_followup. Code 필수 (even on mixed PRs) → fix_code."""
+    fix_code | fix | needs_person. Code 필수 (even on mixed PRs) → fix_code."""
     from app.office import jobs
     from app.work import devwork
 
     flow = office.read_flow()
     required = [str(x) for x in (flow.get("required") or [])]
     if required and _required_only_blocked(required):
-        _save_followups(flow.get("pr") or {}, required, "에이전트가 못 고치는 파일 · 후속")
-        office.write_flow(verdict_ok=True, required=[], suggestions=list(flow.get("suggestions") or []) + required)
-        return jobs.start_task("review", "후속 남기고 머지 시작", review_and_merge, True, _from=_from), "merge_followup"
+        # Never merge with required fixes left open: a person decides.
+        _save_followups(flow.get("pr") or {}, required, "에이전트가 못 고치는 파일 · 사람 확인 필요")
+        # park the PR so 자동 진행 does not hand it out again every loop
+        office.write_flow(review_round=max(int(flow.get("review_round") or 0), MAX_FIX_ROUNDS), needs_person=True)
+        return None, "needs_person"
     need_code = _required_points_at_code(required) or not _pr_has_posts(flow)
     if need_code:
         return jobs.start_task("fix_code", "리뷰 지적 코드 고치기 시작", devwork.fix_review, _from=_from), "fix_code"
@@ -1258,8 +1369,8 @@ def review_and_merge(work, force: bool = False, review_only: bool = False) -> st
             if int(flow.get("review_round") or 0) >= MAX_FIX_ROUNDS:
                 return f"{verdict} · 머지는 멈췄어요 (막는 문제가 있어요. 리뷰를 봐 주세요)"
             who, kind = start_fix_for_review(_from=work.role)
-            if kind == "merge_followup":
-                return f"{verdict} · 에이전트가 못 고치는 항목은 후속으로 남기고 머지해요"
+            if kind == "needs_person":
+                return f"{verdict} · 에이전트가 못 고치는 항목이라 머지를 멈췄어요. 리뷰를 봐 주세요"
             if who:
                 person = office.staff_by_role(who)["name"]
                 if kind == "fix_code":
@@ -1313,10 +1424,26 @@ _RESEARCH_LOCK = threading.RLock()   # research.json is updated by several write
 _BANK_LOCK = threading.Lock()        # okadmin topic bank state (priority_enqueue / refresh)
 _SEO_LOCK = threading.Lock()         # okadmin gsc run record
 # okadmin topic bank id → okpy posts category (generate_posts.py argument)
-BANK_TO_CATEGORY = {"python": "python", "cloud": "cloud", "terraform": "terraform",
-                    "eng_comms": "eng-comms", "ai_models": "ai-models"}
-BANK_LABEL = {"python": "Python 라이브러리", "cloud": "클라우드 비교", "terraform": "Terraform",
-              "eng_comms": "엔지니어 소통", "ai_models": "AI 모델 비교"}
+BANK_TO_CATEGORY = {
+    "python": "python",
+    "cloud": "cloud",
+    "terraform": "terraform",
+    "dev_method": "dev-method",
+    "data_analysis": "data-analysis",
+    "eng_comms": "eng-comms",
+    "ai_models": "ai-models",
+    "career": "career",
+}
+BANK_LABEL = {
+    "python": "Python 라이브러리",
+    "cloud": "클라우드 비교",
+    "terraform": "Terraform",
+    "dev_method": "개발방법론",
+    "data_analysis": "Business Analysis (영문)",
+    "eng_comms": "엔지니어 소통",
+    "ai_models": "AI 모델 비교",
+    "career": "Career",
+}
 
 
 def read_research(raw: bool = False) -> dict[str, Any]:
@@ -1338,18 +1465,52 @@ def _save_research(data: dict[str, Any]) -> None:
 
 
 def seed_options() -> dict[str, Any]:
-    """Seed keywords okadmin recommends for okpy Trends (JA/KO/EN + defaults)."""
+    """Seed keywords okadmin recommends for Trends (JA/KO/EN + defaults).
+
+    OKPy: Japanese only, aligned to writable categories (`OKPY_CATEGORY_SEEDS`).
+    """
+    if contentkit.is_okpy():
+        ja = contentkit.okpy_seed_keywords(24)
+        # One seed from each writable category as the default checked set.
+        defaults = [
+            next(iter(contentkit.OKPY_CATEGORY_SEEDS.get(c) or ()), "")
+            for c in contentkit.OKPY_CATEGORIES
+        ]
+        defaults = [d for d in defaults if d][:8]
+        return {
+            "site_id": sites.current().oid,
+            "defaults": defaults,
+            "ja": ja,
+            "ko": [],
+            "en": [],
+            "by_category": {
+                c: list(contentkit.OKPY_CATEGORY_SEEDS.get(c) or ())
+                for c in contentkit.OKPY_CATEGORIES
+            },
+        }
     try:
         _okadmin_import()
         from trends_topic_ai import seed_recommendations_for_site
 
         return seed_recommendations_for_site(sites.current().oid)
     except Exception:  # noqa: BLE001
-        return {"defaults": ["Python ライブラリ", "Terraform", "AWS GCP Azure 比較"], "ja": [], "ko": [], "en": []}
+        return {"defaults": [], "ja": [], "ko": [], "en": []}
 
 
 def seed_chips(limit: int = 20) -> dict[str, Any]:
-    """Keywords shown on the write screen: a pool of up to `limit` (default 20) to pick from."""
+    """Keywords shown on the write screen: a pool of up to `limit` (default 20) to pick from.
+
+    OKPy: Japanese · category-aligned round-robin. Other sites: JA/KO/EN round-robin.
+    """
+    if contentkit.is_okpy():
+        opts = seed_options()
+        pool = contentkit.okpy_seed_keywords(limit)
+        defaults = [str(x).strip() for x in (opts.get("defaults") or []) if str(x).strip()]
+        seen = {w.lower() for w in pool}
+        # One keyword per writable category checked → research covers all banks.
+        checked = [w for w in defaults if w.lower() in seen][: len(contentkit.OKPY_CATEGORIES)] or pool[:3]
+        return {"all": pool, "checked": checked, "by_category": opts.get("by_category") or {}}
+
     opts = seed_options()
     defaults = [str(x).strip() for x in (opts.get("defaults") or []) if str(x).strip()]
     langs = [
@@ -1370,7 +1531,6 @@ def seed_chips(limit: int = 20) -> dict[str, Any]:
     for w in defaults:
         if _add(w):
             break
-    # Round-robin JA/KO/EN so one language does not fill the whole chip row.
     if len(pool) < limit:
         i = 0
         while len(pool) < limit:
@@ -1390,39 +1550,153 @@ def seed_chips(limit: int = 20) -> dict[str, Any]:
 
 
 def ensure_analysis_picks() -> None:
-    """Fold GA4·GSC analysis topics into the assignable picks list (idempotent)."""
+    """Fold GA4·GSC analysis topics into the assignable picks list (idempotent).
+
+    CompanyDB: only listed companies (ticker+market). Guide-style strings and
+    already-covered tickers are dropped from the list.
+    OKPy: never — 맡길 목록은 카테고리 리서치 픽만 (남은 analysis 픽은 제거).
+    """
+    from app.content import contentkit
     from app.work import marketing
 
-    topics = [str(t).strip() for t in (marketing.read_analysis().get("topics") or []) if str(t).strip()]
-    if not topics:
-        return
-    cats = categories()
-    default_cat = cats[0] if cats else "python"
+    topics = marketing.read_analysis().get("topics") or []
     with _RESEARCH_LOCK:
         data = read_research(raw=True)
         picks = list(data.get("picks") or [])
-        existing = {str(p.get("topic") or "").strip().lower() for p in picks}
-        added = False
-        for topic in topics:
-            key = topic.lower()
-            if key in existing:
-                continue
-            pid = f"ana-{abs(hash(key)) % 10**10}"
-            picks.append({
-                "id": pid,
-                "topic": topic[:200],
-                "category": default_cat,
-                "source": "analysis",
-                "kind": "분석 추천",
-                "bank_label": "분석 추천",
-                "status": "new",
-                "why": "GA4·GSC 분석에서 나온 주제",
-            })
-            existing.add(key)
-            added = True
-        if added:
+        changed = False
+
+        if contentkit.is_okpy():
+            kept = [p for p in picks if p.get("source") != "analysis"]
+            if len(kept) != len(picks):
+                picks = kept
+                changed = True
+        elif contentkit.is_companydb():
+            from app.content import cdbcontent
+
+            have = cdbcontent.covered()
+            skip = cdbcontent.skipped_tickers()
+            kept: list[dict[str, Any]] = []
+            for p in picks:
+                if p.get("source") != "analysis":
+                    kept.append(p)
+                    continue
+                row = p.get("row") if isinstance(p.get("row"), dict) else {}
+                t = str(row.get("ticker") or "").strip().upper()
+                if not t or t in have or t in skip:
+                    changed = True
+                    continue  # guide leftover, already on site, or no filings
+                kept.append({**p, "row": {**row, "ticker": t}, "topic": p.get("topic") or f"{t} {row.get('name') or t}"})
+            picks = kept
+            existing_tickers = {
+                str((p.get("row") or {}).get("ticker") or "").strip().upper()
+                for p in picks if (p.get("row") or {}).get("ticker")
+            }
+            for item in topics:
+                if not isinstance(item, dict):
+                    continue
+                m = str(item.get("market") or "").upper()
+                t = str(item.get("ticker") or "").strip().upper()
+                if m not in cdbcontent.CATEGORIES or not t or t in have or t in skip or t in existing_tickers:
+                    continue
+                name = str(item.get("name_en") or t)[:80]
+                pid = f"ana-{t.lower()}"
+                picks.append({
+                    "id": pid,
+                    "topic": f"{t} {name}",
+                    "category": m,
+                    "row": {"market": m, "ticker": t, "name": name},
+                    "source": "analysis",
+                    "kind": "분석 추천",
+                    "bank_label": cdbcontent.MARKET_LABEL[m],
+                    "status": "new",
+                    "why": str(item.get("why") or "GA4·GSC 분석에서 나온 회사")[:200],
+                })
+                existing_tickers.add(t)
+                changed = True
+        else:
+            strings: list[str] = []
+            for t in topics:
+                if isinstance(t, dict):
+                    continue  # company-shaped topics belong on CompanyDB only
+                s = str(t).strip()
+                if s:
+                    strings.append(s)
+            cats = categories()
+            default_cat = cats[0] if cats else "python"
+            existing = {str(p.get("topic") or "").strip().lower() for p in picks}
+            for topic in strings:
+                key = topic.lower()
+                if key in existing:
+                    continue
+                pid = f"ana-{abs(hash(key)) % 10**10}"
+                picks.append({
+                    "id": pid,
+                    "topic": topic[:200],
+                    "category": default_cat,
+                    "source": "analysis",
+                    "kind": "분석 추천",
+                    "bank_label": "분석 추천",
+                    "status": "new",
+                    "why": "GA4·GSC 분석에서 나온 주제",
+                })
+                existing.add(key)
+                changed = True
+
+        if changed:
             data["picks"] = picks
             _save_research(data)
+
+
+def pick_groups_for_write(research: dict[str, Any] | None = None) -> list[dict[str, Any]] | None:
+    """OKPy: every writable category → fresh research picks (empty groups included). Else None.
+
+    data-analysis group = English drafts to write. Japanese convert is separate (`ba_ja_pending`).
+    """
+    from app.content import contentkit
+
+    if not contentkit.is_okpy():
+        return None
+    data = research if isinstance(research, dict) else read_research()
+    label_of = {cat: BANK_LABEL.get(bank, cat) for bank, cat in BANK_TO_CATEGORY.items()}
+    by_cat: dict[str, list[dict[str, Any]]] = {c: [] for c in contentkit.OKPY_CATEGORIES}
+    for p in data.get("picks") or []:
+        if p.get("status") != "new" or p.get("source") == "analysis":
+            continue
+        cat = str(p.get("category") or "").strip()
+        if cat in by_cat:
+            by_cat[cat].append(p)
+    return [
+        {"category": c, "label": label_of.get(c, c), "picks": by_cat[c]}
+        for c in contentkit.OKPY_CATEGORIES
+    ]
+
+
+def ba_ja_pending(limit: int = 20) -> list[dict[str, str]]:
+    """English Business Analysis drafts waiting for Japanese (write screen, separate from EN picks)."""
+    from app.content import contentkit
+
+    if not contentkit.is_okpy():
+        return []
+    posts = OKPY / "app" / "content" / "posts" / "data-analysis"
+    if not posts.is_dir():
+        return []
+    out: list[dict[str, str]] = []
+    for path in sorted(posts.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if not (re.search(r"(?m)^lang:\s*en\s*$", text) or "ja_pending: true" in text):
+            continue
+        title = path.stem
+        m = re.search(r"(?m)^title:\s*(.+)\s*$", text)
+        if m:
+            title = m.group(1).strip().strip("'\"")
+        rel = str(path.relative_to(OKPY)).replace("\\", "/")
+        out.append({"name": path.name, "title": title, "path": rel})
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _keywords_from_snapshot(snap: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -1436,6 +1710,20 @@ def _keywords_from_snapshot(snap: dict[str, Any] | None) -> list[dict[str, Any]]
                     seen.add(q.lower())
                     out.append({"word": q, "from": f"트렌드 {'급상승' if kind == 'rising' else '인기'} · {seed}",
                                 "value": int((row or {}).get("value") or 0)})
+    return out
+
+
+def _keywords_from_seeds(seeds: list[str] | None, *, source: str = "선택한 시드") -> list[dict[str, Any]]:
+    """Chip seeds as keyword rows (CompanyDB / Trends empty fallback)."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in seeds or []:
+        w = str(raw or "").strip()
+        key = w.lower()
+        if not w or key in seen:
+            continue
+        seen.add(key)
+        out.append({"word": w, "from": source, "value": 0})
     return out
 
 
@@ -1469,6 +1757,115 @@ def _search_keywords(limit: int = 6) -> list[dict[str, Any]]:
     return out
 
 
+OKPY_MIN_PER_CATEGORY = 2  # 맡길 목록: 허용 카테고리마다 최소 이만큼
+
+
+def _okpy_make_pick(bank: str, value: str, *, keyword: str = "", why: str = "", idx: int = 0) -> dict[str, Any]:
+    cat = BANK_TO_CATEGORY[bank]
+    field = "lib_name" if bank == "python" else "Topic"
+    pick = {
+        "id": f"p{int(time.time())}{idx}",
+        "bank": bank, "kind": BANK_LABEL[bank], "bank_label": BANK_LABEL[bank], "category": cat,
+        "row": {field: value}, "topic": value,
+        "keyword": keyword, "why": why, "status": "new",
+    }
+    if cat == "data-analysis":
+        pick["needs_ja"] = True
+    return pick
+
+
+def _okpy_parse_topic_items(
+    items: list[Any],
+    existing: dict[str, set[str]],
+    seen: set[str],
+    start_idx: int = 0,
+) -> list[dict[str, Any]]:
+    picks: list[dict[str, Any]] = []
+    for i, item in enumerate(items or []):
+        bank = str((item or {}).get("bank") or "").strip()
+        row = (item or {}).get("row") or {}
+        if bank not in BANK_TO_CATEGORY or not isinstance(row, dict):
+            continue
+        field = "lib_name" if bank == "python" else "Topic"
+        value = str(row.get(field) or "").strip()
+        if not value or value.lower() in existing.get(bank, set()) or value.lower() in seen:
+            continue
+        cat = BANK_TO_CATEGORY[bank]
+        if topic_already_covered(cat, value):
+            continue
+        seen.add(value.lower())
+        picks.append(_okpy_make_pick(
+            bank, value,
+            keyword=str(item.get("keyword") or ""),
+            why=str(item.get("why") or ""),
+            idx=start_idx + i,
+        ))
+    return picks
+
+
+def _okpy_fill_category_gaps(
+    picks: list[dict[str, Any]],
+    existing: dict[str, set[str]],
+    keywords: list[dict[str, Any]],
+    claude_json,
+    model: str,
+    per_cat: int = OKPY_MIN_PER_CATEGORY,
+) -> list[dict[str, Any]]:
+    """Ensure each writable bank has at least `per_cat` picks (second Claude pass for gaps)."""
+    from collections import Counter
+
+    counts = Counter(str(p.get("bank") or "") for p in picks)
+    need: list[tuple[str, int]] = []
+    for bank in BANK_TO_CATEGORY:
+        gap = per_cat - counts.get(bank, 0)
+        if gap > 0:
+            need.append((bank, gap))
+    if not need:
+        return picks
+    seen = {str(p.get("topic") or "").lower() for p in picks}
+    kw_lines = "\n".join(
+        f"- {k['word']} ({k['from']}{', ' + str(k['value']) if k.get('value') else ''})"
+        for k in keywords[:24]
+    )
+    need_lines = "\n".join(f"- {bank}: need {n} more" for bank, n in need)
+    avoid = "\n".join(
+        f"{bank}: {', '.join(sorted(existing.get(bank, set()) | {t for t in seen}) )[:400]}"
+        for bank, _ in need
+    )
+    bank_list = "|".join(b for b, _ in need)
+    total = sum(n for _, n in need)
+    prompt = f"""You are the editor of OKPy. Fill MISSING category quotas only.
+Need exactly these additional topics (total {total}):
+{need_lines}
+
+Keywords (Japanese search intent):
+{kw_lines}
+
+Field format per bank:
+- python: {{"lib_name": "LibraryName"}}
+- cloud / terraform / ai_models / data_analysis: {{"Topic": "English topic"}}
+- data_analysis topics must be English (JA convert later)
+- dev_method / eng_comms / career: {{"Topic": "日本語トピック"}}
+
+Do NOT duplicate:
+{avoid}
+
+Return ONLY JSON:
+{{"topics": [{{"bank": "{bank_list}", "row": {{...}}, "keyword": "...", "why": "한국어 한 줄"}}]}}"""
+    data = claude_json(prompt, timeout_sec=240, model=model) or {}
+    extra = _okpy_parse_topic_items(data.get("topics") or [], existing, seen, start_idx=len(picks) + 10)
+    # Keep only banks that still need slots
+    still = {b: n for b, n in need}
+    filled: list[dict[str, Any]] = []
+    for p in extra:
+        b = p["bank"]
+        if still.get(b, 0) <= 0:
+            continue
+        filled.append(p)
+        still[b] -= 1
+    return picks + filled
+
+
 def research(work, seeds: list[str], auto_n: int, n_topics: int = 8) -> str:
     """Trends → keywords → Claude picks topics for OKPy banks → recommendation list (→ 서연)."""
     _need_content()
@@ -1478,7 +1875,11 @@ def research(work, seeds: list[str], auto_n: int, n_topics: int = 8) -> str:
     from okpy_topic_ai import _existing_python, _existing_topics
     from trends_topic_ai import load_trends_snapshot, normalize_seed_picks, run_trends_seed
 
+    if contentkit.is_okpy() and not seeds:
+        seeds = list(seed_options().get("defaults") or [])
     picked = normalize_seed_picks(seeds, max_n=20) if seeds else None
+    if contentkit.is_okpy():
+        n_topics = max(int(n_topics or 0), len(BANK_TO_CATEGORY) * OKPY_MIN_PER_CATEGORY)
     work.say("구글 트렌드에서 검색어를 찾는 중")
     trend_note = ""
     try:
@@ -1489,6 +1890,20 @@ def research(work, seeds: list[str], auto_n: int, n_topics: int = 8) -> str:
         trend_note = _ko(exc)
     keywords = _keywords_from_snapshot(load_trends_snapshot(sites.current().oid)) + \
         (_editorial_keywords() if contentkit.uses_editorial_keywords() else []) + _search_keywords()
+    # User-picked chips always count (Trends may return empty related queries).
+    seen_kw = {str(k.get("word") or "").lower() for k in keywords}
+    for row in _keywords_from_seeds(picked):
+        if row["word"].lower() not in seen_kw:
+            keywords.append(row)
+            seen_kw.add(row["word"].lower())
+    if not keywords and contentkit.is_okpy():
+        keywords = _keywords_from_seeds(
+            contentkit.okpy_seed_keywords(16), source="OKPy 카테고리 시드",
+        )
+    if not keywords and contentkit.is_companydb():
+        opts = seed_options()
+        fallback = list(opts.get("defaults") or []) + list(opts.get("en") or []) + list(opts.get("ko") or [])
+        keywords = _keywords_from_seeds(fallback[:12], source="CompanyDB 시드")
     if not keywords:
         raise RuntimeError("키워드를 하나도 못 찾았어요. " + (trend_note or ""))
     work.say(contentkit.research_say(len(keywords)))
@@ -1496,17 +1911,17 @@ def research(work, seeds: list[str], auto_n: int, n_topics: int = 8) -> str:
     if kit_picks is not None:
         return _research_done(kit_picks, picked, trend_note, keywords, auto_n)
 
-    existing = {
-        "python": _existing_python(),
-        "cloud": _existing_topics("cloud"),
-        "terraform": _existing_topics("terraform"),
-        "eng_comms": _existing_topics("eng_comms"),
-        "ai_models": _existing_topics("ai_models"),
-    }
+    existing = {bank: (_existing_python() if bank == "python" else _existing_topics(bank))
+                for bank in BANK_TO_CATEGORY}
     kw_lines = "\n".join(f"- {k['word']} ({k['from']}{', ' + str(k['value']) if k['value'] else ''})" for k in keywords[:24])
-    avoid = "\n".join(f"{bank} ({len(v)}): {', '.join(sorted(v)[:200])}" for bank, v in existing.items())
-    prompt = f"""You are the editor of OKPy, a Japanese tech blog (Python libraries, multi-cloud comparison, Terraform, engineer communication, AI model comparison).
-Below are search keywords that are trending or already bring us readers. Recommend {n_topics} NEW article topics that are clearly related to these keywords.
+    avoid = "\n".join(f"{bank} ({len(v)}): {', '.join(sorted(v)[:120])}" for bank, v in existing.items())
+    bank_list = "|".join(BANK_TO_CATEGORY)
+    per = OKPY_MIN_PER_CATEGORY
+    prompt = f"""You are the editor of OKPy, a Japanese tech blog.
+Allowed categories only: Python, Cloud, Terraform, 開発方法論, Business Analysis, エンジニアのコミュニケーション, AIモデル比較, Career.
+Do NOT suggest Data Model, PMBOK, Agile&Scrum, or Fit Journey.
+Below are search keywords. Recommend {n_topics} NEW article topics related to them.
+HARD RULE: at least {per} topics for EVERY bank ({", ".join(BANK_TO_CATEGORY)}). Spread evenly; do not dump into one bank.
 
 Keywords:
 {kw_lines}
@@ -1515,34 +1930,22 @@ Each topic must fit one bank and use that bank's field format:
 - python: {{"lib_name": "LibraryName"}}  (one Python library)
 - cloud: {{"Topic": "AWS X vs GCP Y vs Azure Z ..."}}  (English)
 - terraform: {{"Topic": "Terraform ..."}}  (English)
+- dev_method: {{"Topic": "日本語の開発手法トピック"}}  (Japanese)
+- data_analysis: {{"Topic": "English effect-size / A-B test insight topic"}}  (English only — JA translation is a later step)
 - eng_comms: {{"Topic": "日本語の状況トピック"}}  (Japanese)
 - ai_models: {{"Topic": "GPT-x vs Claude y vs Gemini z for ..."}}  (English)
+- career: {{"Topic": "日本語のIT職種・年収・ロードマップトピック"}}  (Japanese)
 
 Do NOT duplicate existing entries:
 {avoid}
 
 Return ONLY JSON:
-{{"topics": [{{"bank": "python|cloud|terraform|eng_comms|ai_models", "row": {{...}}, "keyword": "which keyword above", "why": "한국어 한 줄: 왜 지금 이 주제인가"}}]}}"""
+{{"topics": [{{"bank": "{bank_list}", "row": {{...}}, "keyword": "which keyword above", "why": "한국어 한 줄: 왜 지금 이 주제인가"}}]}}"""
     data = claude_json(prompt, timeout_sec=300, model=MODEL_HEAVY) or {}
-    picks = []
     seen: set[str] = set()
-    for i, item in enumerate(data.get("topics") or []):
-        bank = str((item or {}).get("bank") or "").strip()
-        row = (item or {}).get("row") or {}
-        if bank not in BANK_TO_CATEGORY or not isinstance(row, dict):
-            continue
-        field = "lib_name" if bank == "python" else "Topic"
-        value = str(row.get(field) or "").strip()
-        if not value or value.lower() in existing[bank] or value.lower() in seen:
-            continue
-        seen.add(value.lower())
-        picks.append({
-            "id": f"p{int(__import__('time').time())}{i}",
-            "bank": bank, "kind": BANK_LABEL[bank], "bank_label": BANK_LABEL[bank], "category": BANK_TO_CATEGORY[bank],
-            "row": {field: value}, "topic": value,
-            "keyword": str(item.get("keyword") or ""), "why": str(item.get("why") or ""),
-            "status": "new",
-        })
+    picks = _okpy_parse_topic_items(data.get("topics") or [], existing, seen)
+    work.say("카테고리별 추천이 부족한 칸을 채우는 중")
+    picks = _okpy_fill_category_gaps(picks, existing, keywords, claude_json, MODEL_HEAVY, per_cat=per)
     return _research_done(picks, picked, trend_note, keywords, auto_n)
 
 
@@ -1569,12 +1972,80 @@ def _research_done(picks: list[dict[str, Any]], picked: Any, trend_note: str, ke
 
 
 def _set_pick(pick_id: str, **changes: Any) -> None:
+    """Update a pick in research.json. `upsert=` materializes queue/virtual picks so errors stick."""
+    seed = changes.pop("upsert", None)
     with _RESEARCH_LOCK:
         data = read_research(raw=True)
-        for p in data.get("picks") or []:
-            if p.get("id") == pick_id:
-                p.update(changes)
-        _save_research(data)
+        picks = list(data.get("picks") or [])
+        hit = next((p for p in picks if p.get("id") == pick_id), None)
+        if hit is None and seed is not None:
+            hit = {**seed, "id": pick_id}
+            picks.append(hit)
+        if hit is not None:
+            hit.update(changes)
+            data["picks"] = picks
+            _save_research(data)
+
+
+def find_and_queue_companies(work, n: int = 10) -> str:
+    """CompanyDB: staff picks listed companies (no owner typing) → universe_extra."""
+    _need_content()
+    if not contentkit.is_companydb():
+        raise RuntimeError("CompanyDB만 회사 찾기를 해요")
+    from app.content import cdbcontent
+    from llm_claude import MODEL_HEAVY, claude_json
+
+    tools.need("claude")
+    _okadmin_import()
+    n = max(3, min(15, int(n or 10)))
+    # System seeds only — owner does not pick keywords or type company names.
+    opts = seed_options()
+    seeds = list(opts.get("defaults") or []) + list(opts.get("en") or []) + list(opts.get("ko") or [])
+    keywords = _keywords_from_seeds(seeds[:12], source="CompanyDB 시드") + _search_keywords()
+    if not keywords:
+        keywords = _keywords_from_seeds(
+            ["japanese stocks", "korean stocks", "annual report", "10-K", "EDINET"],
+            source="기본",
+        )
+    work.say(contentkit.research_say(len(keywords)))
+    picks = cdbcontent.picks_from(
+        claude_json(cdbcontent.research_prompt(keywords, n), timeout_sec=300, model=MODEL_HEAVY) or {},
+        n=n,
+    )
+    work.say("시장 비율(JP 60% · KR 20% · US 20%) 맞추는 중")
+    picks = cdbcontent.fill_market_gaps(picks, keywords, n, claude_json, MODEL_HEAVY)
+    if not picks:
+        raise RuntimeError("추가할 회사를 고르지 못했어요. 다시 맡겨 주세요")
+    done: list[str] = []
+    failed: list[str] = []
+    for pick in picks:
+        row = pick.get("row") or {}
+        market = str(row.get("market") or pick.get("category") or "").upper()
+        ticker = str(row.get("ticker") or "").strip()
+        name = str(row.get("name") or "")
+        if market not in cdbcontent.CATEGORIES or not ticker:
+            continue
+        try:
+            work.say(f"{ticker} {name} 대기열에 넣는 중")
+            out = cdbcontent.enqueue_ticker(market, ticker, name_en=name)
+            label = f"{out.get('market') or market} {out.get('ticker') or ticker}"
+            if out.get("built"):
+                failed.append(f"{label}: 이미 페이지 있음")
+            else:
+                done.append(label)
+        except Exception as exc:  # noqa: BLE001
+            failed.append(f"{ticker}: {_ko(exc)[:80]}")
+    # Keep the list on the write screen (queue picks merge on read; also stash research picks).
+    _save_research({
+        "at": snapshot.now_stamp(), "seeds": seeds[:8], "trend_note": "",
+        "keywords": keywords[:24], "picks": picks,
+    })
+    if not done:
+        raise RuntimeError("대기열에 못 넣었어요" + (f" · {failed[0]}" if failed else ""))
+    note = f" · {len(failed)}곳 건너뜀" if failed else ""
+    if failed:
+        print("find_and_queue fails: " + " / ".join(failed[:4]), file=sys.stderr)
+    return f"{len(done)}곳 찾아 대기열에 넣었어요" + note
 
 
 def write_picks(work, ids: list[str]) -> str:
@@ -1583,17 +2054,68 @@ def write_picks(work, ids: list[str]) -> str:
     tools.need("claude")
     _models_for_covers()
     _okadmin_import()
-    from topic_bank import priority_enqueue
 
     picks = {p["id"]: p for p in (read_research().get("picks") or [])}
     todo = [picks[i] for i in ids if i in picks]
     if not todo:
         raise RuntimeError("쓸 주제가 없어요. 기획팀에게 리서치를 먼저 맡겨 주세요")
     written, failed = [], []
+
+    def _drop_unbuildable(pick: dict[str, Any], err: str) -> None:
+        if not contentkit.is_companydb():
+            return
+        from app.content import cdbcontent
+        if not cdbcontent.unbuildable_error(err):
+            return
+        row = pick.get("row") if isinstance(pick.get("row"), dict) else {}
+        m = str(row.get("market") or pick.get("category") or "").upper()
+        t = str(row.get("ticker") or "").strip()
+        if m and t:
+            try:
+                cdbcontent.mark_skipped(
+                    m, t, reason=err[:200], name=str(row.get("name") or pick.get("topic") or "")[:120],
+                )
+                cdbcontent.drop_from_queue(m, t)
+            except Exception as exc:  # noqa: BLE001
+                print(f"mark_skipped/drop_from_queue failed: {exc}", file=sys.stderr)
+
+    # CompanyDB JP: one EDINET scan before builds — no yuho → fail + leave add-queue.
+    if contentkit.is_companydb():
+        from app.content import cdbcontent
+
+        jp_todo = []
+        for p in todo:
+            row = p.get("row") if isinstance(p.get("row"), dict) else {}
+            m = str(row.get("market") or p.get("category") or "").upper()
+            t = str(row.get("ticker") or "").strip()
+            if m == "JP" and t:
+                jp_todo.append((p, t))
+        if jp_todo:
+            try:
+                ready, _missing = cdbcontent.edinet_ready_tickers(work, [t for _, t in jp_todo])
+            except Exception as exc:  # noqa: BLE001 - fall through to per-ticker build errors
+                print(f"edinet preflight failed: {exc}", file=sys.stderr)
+                ready = {t for _, t in jp_todo}
+            keep = []
+            for p in todo:
+                row = p.get("row") if isinstance(p.get("row"), dict) else {}
+                m = str(row.get("market") or p.get("category") or "").upper()
+                t = str(row.get("ticker") or "").strip()
+                if m == "JP" and t and t not in ready:
+                    err = "EDINET에서 최근 유가증권보고서를 찾지 못했어요"
+                    _set_pick(p["id"], status="failed", error=err, upsert=p)
+                    _drop_unbuildable(p, err)
+                    failed.append(f"{p['topic'][:24]}: {err}")
+                else:
+                    keep.append(p)
+            todo = keep
+
     for n, pick in enumerate(todo, 1):
-        _set_pick(pick["id"], status="writing")
+        _set_pick(pick["id"], status="writing", upsert=pick)
         if contentkit.uses_topic_bank() and pick.get("bank") and pick.get("row"):
             try:
+                from topic_bank import priority_enqueue
+
                 with _BANK_LOCK:
                     priority_enqueue(sites.current().oid, pick["bank"], [pick["row"]])  # same bookkeeping 8090 does
             except Exception as exc:  # noqa: BLE001
@@ -1604,11 +2126,29 @@ def write_picks(work, ids: list[str]) -> str:
             if result is None:
                 result = _run_okpy(work, work.role, _WRITE_CODE, [pick["category"], pick["topic"]], timeout=60 * 30,
                                    no_cover=not _cover_ok())
-            _set_pick(pick["id"], status="written", path=result.get("path"), title=result.get("title"))
+            path = result.get("path") or ""
+            _set_pick(pick["id"], status="written", path=path, title=result.get("title"),
+                      needs_ja=bool(pick.get("needs_ja") or pick.get("category") == "data-analysis"))
             written.append(result.get("title") or pick["topic"])
+            if pick.get("category") == "data-analysis" and path:
+                try:
+                    from app.work import workqueue
+                    workqueue.enqueue({
+                        "source": "task",
+                        "task": "ba_ja",
+                        "title": f"BA 일본어화 · {pick['topic'][:40]}",
+                        "label": "Business Analysis 영→일",
+                        "site": sites.current_id(),
+                        "paths": [path],
+                    })
+                    workqueue.kick(sites.current_id())
+                except Exception as exc:  # noqa: BLE001
+                    print(f"ba_ja enqueue failed: {exc}", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001 - keep going with the rest
-            _set_pick(pick["id"], status="failed", error=str(exc)[:200])
-            failed.append(pick["topic"])
+            err = str(exc)[:200]
+            _set_pick(pick["id"], status="failed", error=err)
+            _drop_unbuildable(pick, err)
+            failed.append(f"{pick['topic'][:24]}: {err}")
     try:
         if contentkit.uses_topic_bank():
             from topic_bank_pipeline import refresh_topic_state
@@ -1618,8 +2158,48 @@ def write_picks(work, ids: list[str]) -> str:
     except Exception as exc:  # noqa: BLE001
         print(f"refresh_topic_state failed: {exc}", file=sys.stderr)
     if not written:
-        raise RuntimeError(f"{len(failed)}편 모두 못 썼어요")
-    return f"{len(written)}편을 썼어요" + (f" · {len(failed)}편 실패" if failed else "")
+        why = " · ".join(failed[:2]) if failed else ""
+        raise RuntimeError(f"{len(failed)}편 모두 못 썼어요" + (f" · {why}" if why else ""))
+    note = f" · {len(failed)}편 실패" if failed else ""
+    if failed:
+        note += " · " + failed[0][:80]
+    return f"{len(written)}편을 썼어요" + note
+
+
+def translate_ba_ja(work, rels: list[str] | None = None) -> str:
+    """Business Analysis: convert English drafts (lang: en) to Japanese — separate from writing."""
+    _need_content()
+    if not contentkit.is_okpy():
+        raise RuntimeError("okpy만 Business Analysis 일본어화를 해요")
+    tools.need("claude")
+    sys.path.insert(0, str(OKPY / "scripts"))
+    import generate_posts as g  # noqa: WPS433
+
+    posts_root = OKPY / "app" / "content" / "posts"
+    paths: list[Path] = []
+    if rels:
+        for rel in rels:
+            rel_s = str(rel).lstrip("/")
+            for cand in (posts_root / rel_s, OKPY / rel_s, Path(rel_s)):
+                if cand.is_file():
+                    paths.append(cand)
+                    break
+    if not paths:
+        paths = g.list_en_data_analysis(limit=8)
+    if not paths:
+        raise RuntimeError("일본어로 바꿀 영어 BA 초안이 없어요")
+    done, failed = [], []
+    for n, path in enumerate(paths, 1):
+        work.say(f"{n}/{len(paths)} · {path.name} 일본어로 옮기는 중")
+        try:
+            out = g.translate_data_analysis_to_ja(path)
+            done.append(out.name)
+        except Exception as exc:  # noqa: BLE001
+            failed.append(f"{path.name}: {str(exc)[:80]}")
+    if not done:
+        raise RuntimeError("일본어화에 모두 실패했어요 · " + (failed[0] if failed else ""))
+    note = f" · {len(failed)}편 실패" if failed else ""
+    return f"BA {len(done)}편을 일본어로 옮겼어요" + note
 
 
 
@@ -1663,3 +2243,56 @@ def images_fill_logos(work) -> str:
     out = cdbcontent.fill_logos(work)
     snapshot.refresh_snapshot()
     return out
+
+
+def partner_collect(work) -> str:
+    """제휴 공개 메일 수집 (URL 채움 → 메일 없는 곳 최대 partners.COLLECT_LIMIT)."""
+    from app import partners as partners_mod
+
+    sid = sites.current_id()
+    if sid not in partners_mod.enabled_sites():
+        raise RuntimeError("이 사이트는 제휴 메일 목록이 없어요")
+    noun = (partners_mod.cfg(sid) or {}).get("noun") or "업체"
+    no_mail = len(partners_mod.items(sid, has_email="0"))
+    if not no_mail:
+        return f"메일 없는 {noun}이(가) 없어요"
+    work.say(f"{noun} 공개 메일 수집 · 최대 {partners_mod.COLLECT_LIMIT}곳")
+    out = partners_mod.prepare_and_collect(sid, limit=partners_mod.COLLECT_LIMIT, say=work.say)
+    if not out.get("ok") and not out.get("tried"):
+        return str(out.get("msg") or "웹사이트 있는 곳이 없어요")
+    bits = [f"공개 메일 {out['found']}곳 찾음 · 시도 {out['tried']}곳"]
+    if out.get("from_content"):
+        bits.append(f"콘텐츠 URL {out['from_content']}")
+    if out.get("from_places"):
+        bits.append(f"Places URL {out['from_places']}")
+    bits.append(str(out.get("at") or ""))
+    return " · ".join(bits)
+
+
+def partner_collect_floor(work) -> str:
+    """이 층 제휴 사이트 전부 · Places 한도 나눠 사이트당 수집."""
+    from app import partners as partners_mod
+
+    oid = sites.current().office
+    sids = partners_mod.floor_site_ids(oid)
+    if not sids:
+        raise RuntimeError("이 층에 제휴 메일 사이트가 없어요")
+    lim = partners_mod.floor_per_site_limit(len(sids))
+    off = sites.OFFICES.get(oid)
+    floor = off.floor_label if off else oid
+    work.say(f"{floor} 제휴 메일 수집 · {len(sids)}사이트 · 사이트당 최대 {lim}")
+    found = tried = 0
+    parts: list[str] = []
+    for sid in sids:
+        with sites.use(sid):
+            label = (partners_mod.cfg(sid) or {}).get("noun") or sid
+            no_mail = len(partners_mod.items(sid, has_email="0"))
+            if not no_mail:
+                parts.append(f"{sid}: 메일 다 있음")
+                continue
+            work.say(f"—— {sid} ({label}) ——")
+            out = partners_mod.prepare_and_collect(sid, limit=lim, say=work.say)
+            found += int(out.get("found") or 0)
+            tried += int(out.get("tried") or 0)
+            parts.append(f"{sid}: 찾음 {out.get('found', 0)}/{out.get('tried', 0)}")
+    return f"{floor} 공개 메일 {found}곳 찾음 · 시도 {tried}곳 · " + " · ".join(parts)

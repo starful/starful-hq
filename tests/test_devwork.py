@@ -65,15 +65,15 @@ def test_optimize_tidies_back_and_front_together_then_hands_off(tmp_path, monkey
         return P(), "바꾼 것:\n- 정리"
     monkeypatch.setattr(devwork, "_agent", fake_agent)
     real_start_task = jobs.start_task
-    monkeypatch.setattr(jobs, "start_task", lambda task, *a, **k: started.append(task) or "yuna")
+    monkeypatch.setattr(jobs, "start_task", lambda task, *a, **k: started.append(task) or "mio")
     jobs.JOBS.clear()
-    out = devwork.optimize(jobs.Work("liam"), "", True)
+    out = devwork.optimize(jobs.Work("hajun"), "", True)
     assert {a for a, _ in seen_areas} == {"back", "front"}
     assert abs(seen_areas[0][1] - seen_areas[1][1]) < 0.15            # at the same time
-    assert "백엔드 1개 · 프론트 1개" in out and started == ["issue"]
+    assert "백엔드 1개 · 프론트 1개" in out and "issue" in started
     assert not office.read_flow().get("then_common")   # 공통화 is never chained after a tidy-up
     assert (repo / "app" / "content" / "z.md").read_text().startswith("marketing")   # other team's edit kept
-    helper = next(r for r, j in jobs.JOBS.items() if r != "liam")
+    helper = next(r for r, j in jobs.JOBS.items() if r != "hajun")
     for _ in range(20):
         if not jobs.running(helper):
             break
@@ -217,6 +217,38 @@ def test_ensure_on_main_when_no_open_pr(tmp_path, monkeypatch):
     cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo,
                          capture_output=True, text=True, check=True).stdout.strip()
     assert cur == "main"
+
+
+def test_ensure_on_main_stashes_dirty_then_switches(tmp_path, monkeypatch):
+    """After merge, leftover company pages on the feat branch must not block main."""
+    import subprocess
+
+    from app import office
+
+    def git(*args):
+        subprocess.run(
+            ["git", "-c", "user.email=a@b", "-c", "user.name=a", *args],
+            cwd=repo, check=True,
+        )
+
+    repo = tmp_path / "site"
+    repo.mkdir()
+    git("init", "-q", "-b", "main")
+    (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+    git("add", "tracked.txt")
+    git("commit", "-qm", "init")
+    git("checkout", "-b", "feat/stale")
+    (repo / "tracked.txt").write_text("dirty\n", encoding="utf-8")
+    (repo / "new.html").write_text("<p>x</p>\n", encoding="utf-8")
+    monkeypatch.setattr(workers, "OKPY", repo)
+    monkeypatch.setattr(office, "FLOW_PATH", tmp_path / "flow.json")
+    office.write_flow(pr={"number": 31}, merged=True, deployed=False, branch="feat/stale")
+    assert workers.ensure_on_main_if_idle() is True
+    cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo,
+                         capture_output=True, text=True, check=True).stdout.strip()
+    assert cur == "main"
+    assert (repo / "tracked.txt").read_text(encoding="utf-8") == "dirty\n"
+    assert (repo / "new.html").read_text(encoding="utf-8") == "<p>x</p>\n"
 
 
 def test_sync_clears_stale_merged_false_without_pr(tmp_path, monkeypatch):

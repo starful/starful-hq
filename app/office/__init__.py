@@ -29,43 +29,59 @@ RESEARCH_PATH = sites.data("research.json")
 #   마케팀  (mkt)    클릭 낮은 글(SEO) · 글 다듬기     — middle window desk
 #   디자인팀 (design) 이미지                          — right window desk
 #   개발팀  (dev)    리뷰·머지 · git 푸시 · Cloud Build — middle desk block (리더/프론트/백엔드)
-# 1층 Data Lab
+# Slim roster: 리더 4 (1층) · 사원 12 · 알바 3(schedule). 층·팀당 책상 2명(리더/사원 또는 사원 2).
+# 1층 Data Lab — company leaders sit here
 _STAFF_1F = (
     # id, names (한국어 · 日本語 · English), team, title, art (sprite prefix), team leader, seat
     {"id": "seoyeon", "sex": "f", "name": "Seoyeon", "name_ko": "서연", "name_ja": "ソヨン", "name_en": "Seoyeon", "team": "plan", "title": "기획 리더", "art": "write", "lead": True, "seat": {"x": 10.0, "y": 14.85}},
     {"id": "jiho", "sex": "m", "name": "Haruto", "name_ko": "하루토", "name_ja": "陽翔", "name_en": "Haruto", "team": "plan", "title": "기획", "art": "research", "lead": False, "seat": {"x": 16.25, "y": 14.85}},
-    {"id": "yuna", "sex": "f", "name": "Yui", "name_ko": "유이", "name_ja": "結衣", "name_en": "Yui", "team": "plan", "title": "기획", "art": "issue", "lead": False, "seat": {"x": 22.5, "y": 14.85}},
     {"id": "minjae", "sex": "m", "name": "Minjae", "name_ko": "민재", "name_ja": "ミンジェ", "name_en": "Minjae", "team": "mkt", "title": "마케 리더", "art": "search", "lead": True, "seat": {"x": 13.12, "y": 24.25, "face": "up"}},
     {"id": "subin", "sex": "f", "name": "Sakura", "name_ko": "사쿠라", "name_ja": "さくら", "name_en": "Sakura", "team": "mkt", "title": "마케팅", "art": "search3", "lead": False, "seat": {"x": 19.38, "y": 24.25, "face": "up"}},
     {"id": "haneul", "sex": "f", "name": "Haneul", "name_ko": "하늘", "name_ja": "ハヌル", "name_en": "Haneul", "team": "design", "title": "디자인 리더", "art": "images", "lead": True, "seat": {"x": 42.29, "y": 15.8}},
     {"id": "mio", "sex": "f", "name": "Mio", "name_ko": "미오", "name_ja": "美緒", "name_en": "Mio", "team": "design", "title": "디자인", "art": "mio", "lead": False, "seat": {"x": 48.54, "y": 15.8}},
     {"id": "daeun", "sex": "f", "name": "Daeun", "name_ko": "다은", "name_ja": "ダウン", "name_en": "Daeun", "team": "dev", "title": "개발 리더", "art": "review", "lead": True, "seat": {"x": 12.08, "y": 44.6}},
     {"id": "hajun", "sex": "m", "name": "Ren", "name_ko": "렌", "name_ja": "蓮", "name_en": "Ren", "team": "dev", "title": "개발", "art": "write3", "lead": False, "seat": {"x": 18.33, "y": 44.6}},
-    {"id": "doyun", "sex": "m", "name": "Sota", "name_ko": "소타", "name_ja": "颯太", "name_en": "Sota", "team": "dev", "title": "개발", "art": "ship", "lead": False, "seat": {"x": 24.58, "y": 44.6}},
-    {"id": "liam", "sex": "m", "name": "Liam", "name_ko": "리암", "name_ja": "リアム", "name_en": "Liam", "team": "dev", "title": "개발", "art": "liam", "lead": False, "seat": {"x": 12.08, "y": 54.0, "face": "up"}},
-    {"id": "priya", "sex": "f", "name": "Priya", "name_ko": "프리야", "name_ja": "プリヤ", "name_en": "Priya", "team": "dev", "title": "개발", "art": "priya", "lead": False, "seat": {"x": 18.33, "y": 54.0, "face": "up"}},
-    {"id": "wei", "sex": "m", "name": "Wei", "name_ko": "웨이", "name_ja": "ウェイ", "name_en": "Wei", "team": "dev", "title": "개발", "art": "wei", "lead": False, "seat": {"x": 24.58, "y": 54.0, "face": "up"}},
 )
-# 2층 Playground: its own people (jobs are per person, so the two floors never wait for each other).
-# Their own floor plan (static/office/floor-2.svg): seats below are percent of that picture.
+# 2층 Playground: staff only (no company lead). Leaders meeting uses company_leaders().
 _STAFF_2F = (
-    {"id": "nari", "sex": "f", "name": "Nari", "name_ko": "나리", "name_ja": "ナリ", "name_en": "Nari", "team": "plan", "title": "기획 리더", "art": "nari", "lead": True, "seat": {"x": 34.17, "y": 35.8}},
+    {"id": "nari", "sex": "f", "name": "Nari", "name_ko": "나리", "name_ja": "ナリ", "name_en": "Nari", "team": "plan", "title": "기획", "art": "nari", "lead": False, "seat": {"x": 34.17, "y": 35.8}},
     {"id": "kaito", "sex": "m", "name": "Kaito", "name_ko": "카이토", "name_ja": "海斗", "name_en": "Kaito", "team": "plan", "title": "기획", "art": "kaito", "lead": False, "seat": {"x": 40.42, "y": 35.8}},
-    {"id": "emma", "sex": "f", "name": "Emma", "name_ko": "엠마", "name_ja": "エマ", "name_en": "Emma", "team": "plan", "title": "기획", "art": "emma", "lead": False, "seat": {"x": 46.67, "y": 35.8}},
-    {"id": "hina", "sex": "f", "name": "Hina", "name_ko": "히나", "name_ja": "陽菜", "name_en": "Hina", "team": "mkt", "title": "마케 리더", "art": "hina", "lead": True, "seat": {"x": 37.29, "y": 45.2, "face": "up"}},
+    {"id": "hina", "sex": "f", "name": "Hina", "name_ko": "히나", "name_ja": "陽菜", "name_en": "Hina", "team": "mkt", "title": "마케팅", "art": "hina", "lead": False, "seat": {"x": 37.29, "y": 45.2, "face": "up"}},
     {"id": "marco", "sex": "m", "name": "Marco", "name_ko": "마르코", "name_ja": "マルコ", "name_en": "Marco", "team": "mkt", "title": "마케팅", "art": "marco", "lead": False, "seat": {"x": 43.54, "y": 45.2, "face": "up"}},
-    {"id": "sora", "sex": "f", "name": "Sora", "name_ko": "소라", "name_ja": "そら", "name_en": "Sora", "team": "design", "title": "디자인 리더", "art": "sora", "lead": True, "seat": {"x": 59.17, "y": 35.8}},
+    {"id": "sora", "sex": "f", "name": "Sora", "name_ko": "소라", "name_ja": "そら", "name_en": "Sora", "team": "design", "title": "디자인", "art": "sora", "lead": False, "seat": {"x": 59.17, "y": 35.8}},
     {"id": "yejin", "sex": "f", "name": "Yejin", "name_ko": "예진", "name_ja": "イェジン", "name_en": "Yejin", "team": "design", "title": "디자인", "art": "yejin", "lead": False, "seat": {"x": 65.42, "y": 35.8}},
-    {"id": "hyunwoo", "sex": "m", "name": "Hyunwoo", "name_ko": "현우", "name_ja": "ヒョヌ", "name_en": "Hyunwoo", "team": "dev", "title": "개발 리더", "art": "hyunwoo", "lead": True, "seat": {"x": 81.67, "y": 35.8}},
+    {"id": "hyunwoo", "sex": "m", "name": "Hyunwoo", "name_ko": "현우", "name_ja": "ヒョヌ", "name_en": "Hyunwoo", "team": "dev", "title": "개발", "art": "hyunwoo", "lead": False, "seat": {"x": 81.67, "y": 35.8}},
     {"id": "kenta", "sex": "m", "name": "Kenta", "name_ko": "켄타", "name_ja": "健太", "name_en": "Kenta", "team": "dev", "title": "개발", "art": "kenta", "lead": False, "seat": {"x": 87.92, "y": 35.8}},
-    {"id": "ana", "sex": "f", "name": "Ana", "name_ko": "아나", "name_ja": "アナ", "name_en": "Ana", "team": "dev", "title": "개발", "art": "ana", "lead": False, "seat": {"x": 94.17, "y": 35.8}},
 )
-# B1 Back Office has no people of its own: whoever is free upstairs comes down for its work (see ordered_members).
-STAFF = {"datalab": _STAFF_1F, "playground": _STAFF_2F, "basement": ()}
+# B1 Task Force: temporary staff for SiteKPI (not vacation-cover alba). lead=False — company leaders stay on 1층.
+_STAFF_B1 = (
+    {"id": "tf_rio", "sex": "m", "name": "Rio", "name_ko": "리오", "name_ja": "リオ", "name_en": "Rio",
+     "team": "plan", "title": "TF 기획", "art": "liam", "lead": False, "temp": True,
+     "seat": {"x": 18.96, "y": 24.3}},
+    {"id": "tf_mina", "sex": "f", "name": "Mina", "name_ko": "미나", "name_ja": "ミナ", "name_en": "Mina",
+     "team": "mkt", "title": "TF 마케", "art": "emma", "lead": False, "temp": True,
+     "seat": {"x": 18.96, "y": 33.7, "face": "up"}},
+    {"id": "tf_noa", "sex": "f", "name": "Noa", "name_ko": "노아", "name_ja": "ノア", "name_en": "Noa",
+     "team": "design", "title": "TF 디자인", "art": "ana", "lead": False, "temp": True,
+     "seat": {"x": 25.21, "y": 24.3}},
+    {"id": "tf_jun", "sex": "m", "name": "Jun", "name_ko": "준", "name_ja": "ジュン", "name_en": "Jun",
+     "team": "dev", "title": "TF 개발", "art": "wei", "lead": False, "temp": True,
+     "seat": {"x": 25.21, "y": 33.7, "face": "up"}},
+)
+STAFF = {"datalab": _STAFF_1F, "playground": _STAFF_2F, "basement": _STAFF_B1}
 for _office, _people in STAFF.items():
     for _p in _people:
         _p["office"] = _office
 ALL_PEOPLE = tuple(p for people in STAFF.values() for p in people)
+
+
+def _live_staff(o: str) -> tuple:
+    """Active roster for a floor (STAFF − fired + hired). Falls back to baked-in STAFF."""
+    try:
+        from app.office import staffing as _staffing
+        return _staffing.active_staff(o)
+    except Exception:
+        return STAFF.get(o, ())
 
 
 def _here() -> str:
@@ -139,22 +155,29 @@ class _PerOfficeMap(Mapping):
         return repr(self._now())
 
 
-PEOPLE = _PerOffice(lambda o: STAFF.get(o, ()))
+PEOPLE = _PerOffice(lambda o: _live_staff(o))
 TEAM_INFO = {
     "plan": {"name": "Planning", "work": "리서치 · 글 · 이슈·PR · 제안", "step": "write", "plate": {"x": 2.17, "y": 8.5}},
     "mkt": {"name": "Marketing", "work": "검색 · 다듬기 · GA4·GSC 분석", "step": "search", "plate": {"x": 2.17, "y": 29.6}},
     "design": {"name": "Design", "work": "이미지", "step": "images", "plate": {"x": 33.0, "y": 29.6}},
     "dev": {"name": "Dev", "work": "리뷰·머지 · 공통화·소스정리 · git · Cloud Build", "step": "ship", "plate": {"x": 2.17, "y": 61.6}},
 }
-TEAMS = _PerOfficeMap(lambda o: {t: tuple(p["id"] for p in STAFF.get(o, ()) if p["team"] == t) for t in TEAM_INFO})
-LEADERS = _PerOffice(lambda o: (p["id"] for p in STAFF.get(o, ()) if p.get("lead")))
+TEAMS = _PerOfficeMap(lambda o: {t: tuple(p["id"] for p in _live_staff(o) if p["team"] == t) for t in TEAM_INFO})
+# Floor roster leads (1층 only after slim). Prefer these; leaders/boss meetings use company_leaders().
+LEADERS = _PerOffice(lambda o: (p["id"] for p in _live_staff(o) if p.get("lead")))
+
+
+def company_leaders() -> tuple[str, ...]:
+    """The four team leads (always 1층). Used for 리더 회의 · 사장실 호출."""
+    return tuple(p["id"] for p in ALL_PEOPLE if p.get("lead") and not p.get("temp"))
 
 
 def full_name(p: dict) -> str:
     """Names are shown in English only (Korean/Japanese stay as data: name_ko, name_ja)."""
     return p.get("name_en") or p.get("name") or ""
-TASK_TEAM = {"research": "plan", "write": "plan", "issue": "plan", "propose": "plan", "search": "mkt", "polish": "mkt",
+TASK_TEAM = {"research": "plan", "write": "plan", "ba_ja": "plan", "queue": "plan", "issue": "plan", "propose": "plan", "search": "mkt", "polish": "mkt",
              "analyze": "mkt", "fix": "mkt", "fix_code": "dev",
+             "partner_collect": "mkt", "partner_collect_floor": "mkt",
              "refactor": "dev", "refactor_front": "dev", "refactor_back": "dev", "optimize": "dev", "images": "design", "review": "dev", "push": "dev", "deploy": "dev"}
 # Work of the same group is done by one person at a time (start_task refuses a second one).
 # Item tasks (write / search / polish) are split instead: only the same post/URL is refused.
@@ -217,19 +240,24 @@ _LAYOUT_2F = {
     "floor": "office/floor-2.svg", "front": "office/floor-front-2.svg", "nav": "office/nav-2.json",
 }
 
-# B1 Back Office (static/office/floor-b1.svg, nav-b1.json): a smaller floor with only a workroom, a lounge,
-# restrooms and a smoking room — no meeting rooms, no CEO room. Nobody is based here (STAFF['basement'] is empty):
-# a free person of the right team comes down the stairs (entry), works at a free desk (hot) and goes back up.
+# B1 Task Force (static/office/floor-b1.svg): SiteKPI 전용. 임시 사원 상주 · 작은 TF 탁자(meeting/leaders).
+# borrow 아님. (옛 Back Office borrow 코드는 is_borrowed()로 남아 있으나 기본 레이아웃은 끔.)
 _LAYOUT_B1 = {
-    "borrow": True, "max_visitors": 2, "entry": {"x": 20.08, "y": 72.0},
-    "hot": tuple([{"x": 18.96, "y": 24.3}, {"x": 18.96, "y": 33.7, "face": "up"}, {"x": 25.21, "y": 24.3}, {"x": 25.21, "y": 33.7, "face": "up"}, {"x": 31.46, "y": 24.3}, {"x": 31.46, "y": 33.7, "face": "up"}, {"x": 18.96, "y": 41.8}, {"x": 18.96, "y": 51.2, "face": "up"}, {"x": 25.21, "y": 41.8}, {"x": 25.21, "y": 51.2, "face": "up"}, {"x": 31.46, "y": 41.8}, {"x": 31.46, "y": 51.2, "face": "up"}]),
-    "task_seat": {}, "meeting": (), "leaders": (), "meet3": (),
+    "borrow": False, "entry": {"x": 20.08, "y": 72.0},
+    "hot": ({"x": 31.46, "y": 24.3}, {"x": 31.46, "y": 33.7, "face": "up"}, {"x": 18.96, "y": 41.8}),
+    "task_seat": {},
+    "meeting": ({"x": 18.96, "y": 41.8}, {"x": 25.21, "y": 41.8}, {"x": 31.46, "y": 41.8},
+                {"x": 18.96, "y": 51.2, "face": "up"}, {"x": 25.21, "y": 51.2, "face": "up"}, {"x": 31.46, "y": 51.2, "face": "up"}),
+    "leaders": ({"x": 18.96, "y": 41.8}, {"x": 25.21, "y": 41.8}, {"x": 31.46, "y": 41.8},
+                {"x": 18.96, "y": 51.2, "face": "up"}, {"x": 25.21, "y": 51.2, "face": "up"}, {"x": 31.46, "y": 51.2, "face": "up"}),
+    "meet3": ({"x": 18.96, "y": 41.8}, {"x": 25.21, "y": 41.8}, {"x": 31.46, "y": 41.8},
+              {"x": 18.96, "y": 51.2, "face": "up"}, {"x": 25.21, "y": 51.2, "face": "up"}, {"x": 31.46, "y": 51.2, "face": "up"}),
     "rest": {k: tuple(v) for k, v in {"chat": [{"x": 65.0, "y": 27.0, "face": "right"}, {"x": 68.33, "y": 32.5, "face": "up"}, {"x": 75.0, "y": 26.0, "face": "left"}, {"x": 75.83, "y": 20.0, "face": "left"}, {"x": 62.5, "y": 30.0, "face": "right"}, {"x": 70.83, "y": 32.5, "face": "up"}], "coffee": [{"x": 62.92, "y": 20.0}, {"x": 67.92, "y": 20.0}, {"x": 74.17, "y": 19.0}], "snack": [{"x": 66.67, "y": 32.0, "face": "up"}, {"x": 70.83, "y": 32.0, "face": "up"}], "game": [{"x": 65.0, "y": 27.0, "face": "right"}, {"x": 68.33, "y": 32.5, "face": "up"}, {"x": 75.0, "y": 26.0, "face": "left"}, {"x": 75.83, "y": 20.0, "face": "left"}, {"x": 62.5, "y": 30.0, "face": "right"}, {"x": 70.83, "y": 32.5, "face": "up"}], "smoke": [{"x": 79.79, "y": 52.1, "face": "right"}, {"x": 84.79, "y": 52.1, "face": "left"}, {"x": 82.29, "y": 56.1, "face": "up"}], "wc_m": [{"x": 62.58, "y": 48.6}, {"x": 66.75, "y": 48.6}], "wc_f": [{"x": 62.58, "y": 61.55}, {"x": 66.75, "y": 61.55}]}.items()},
-    "plates": {"mkt": {"x": 11.75, "y": 19.0}, "design": {"x": 11.75, "y": 36.5}, "dev": {"x": 34.58, "y": 53.0}},
+    "plates": {"plan": {"x": 11.75, "y": 12.0}, "mkt": {"x": 11.75, "y": 19.0}, "design": {"x": 11.75, "y": 36.5}, "dev": {"x": 34.58, "y": 53.0}},
     "floor": "office/floor-b1.svg", "front": "office/floor-front-b1.svg", "nav": "office/nav-b1.json",
 }
 LAYOUTS = {"datalab": _LAYOUT_1F, "playground": _LAYOUT_2F, "basement": _LAYOUT_B1}
-# Work of a borrowed floor goes to this team instead (B1 has no planners: the dev team opens its PRs).
+# Legacy: if a floor is still marked borrow, plan work goes to dev (no planners downstairs).
 BORROW_TEAM = {"plan": "dev"}
 
 
@@ -244,13 +272,13 @@ def _job_office(j: dict[str, Any]) -> str:
 
 
 def visitors(office_id: str | None = None, running: dict[str, dict[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
-    """{person: job} of the people working on a borrowed floor right now (meetings don't count)."""
+    """People whose home floor is elsewhere but whose job is here (리더 회의 · B1 borrow · …)."""
     o = office_id or _here()
     if running is None:
         from app.office import jobs
         running = _jobs_by_person(jobs.all_jobs())
     return {p: j for p, j in running.items()
-            if _job_office(j) == o and not str(j.get("task") or "").startswith("meeting")}
+            if _job_office(j) == o and _person_office_id(p) != o}
 
 
 def layout(office_id: str | None = None) -> dict[str, Any]:
@@ -278,20 +306,20 @@ LEADER_SEATS = _PerOffice(lambda o: layout(o)["leaders"])
 MEET_C_SEATS = _PerOffice(lambda o: layout(o)["meet3"])
 REST_SPOTS = _PerOfficeMap(lambda o: layout(o)["rest"])
 PLATES = _PerOfficeMap(lambda o: layout(o)["plates"])
-REST_LABEL = {"chat": "💬 수다", "coffee": "☕ 탕비실", "smoke": "🚬 담배", "snack": "🍪 간식", "lunch": "🍱 점심", "sofa": "🛋️ 쉬는 중", "wc": "🚻 화장실", "lib": "📚 독서", "desk": "💻 자리에서 공부", "game": "🎮 게임"}
+REST_LABEL = {"chat": "💬 수다", "coffee": "☕ 탕비실", "smoke": "🚬 담배", "snack": "🍪 간식", "lunch": "🍱 점심", "sofa": "🛋️ 쉬는 중", "wc": "🚻 화장실", "lib": "📚 독서", "desk": "💻 자리에서 공부", "game": "🎮 게임", "off": "🏠 퇴근", "weekend": "🌴 주말"}
 REST_WEIGHT = (("desk", 5), ("chat", 3), ("coffee", 3), ("game", 3), ("snack", 2), ("smoke", 3), ("wc", 1))
-SMOKERS = frozenset({"minjae", "hajun", "doyun", "marco", "kenta"})
-LUNCH_HOURS = (12,)  # local time: everyone free goes to lunch
+SMOKERS = frozenset({"minjae", "hajun", "marco", "kenta"})
+LUNCH_HOURS = (12,)  # fallback; schedule.lunch_hours() overrides when present
 REST_SLOT_SEC = 300  # each person changes what they do every ~5 minutes (staggered)
 def _chat(o: str) -> tuple:
     return layout(o)["rest"]["chat"]
 
 
-LOUNGE = _PerOfficeMap(lambda o: {p["id"]: dict(_chat(o)[i % len(_chat(o))]) for i, p in enumerate(STAFF.get(o, ()))})
+LOUNGE = _PerOfficeMap(lambda o: {p["id"]: dict(_chat(o)[i % len(_chat(o))]) for i, p in enumerate(_live_staff(o))})
 
 
-PEOPLE_SEAT = _PerOfficeMap(lambda o: {p["id"]: p["seat"] for p in STAFF.get(o, ())})
-PEOPLE_SEX = _PerOfficeMap(lambda o: {p["id"]: p.get("sex", "") for p in STAFF.get(o, ())})
+PEOPLE_SEAT = _PerOfficeMap(lambda o: {p["id"]: p["seat"] for p in _live_staff(o)})
+PEOPLE_SEX = _PerOfficeMap(lambda o: {p["id"]: p.get("sex", "") for p in _live_staff(o)})
 
 
 def rest_plan(idle: list[str] | tuple[str, ...], now: float | None = None) -> dict[str, dict[str, Any]]:
@@ -320,7 +348,18 @@ def rest_plan(idle: list[str] | tuple[str, ...], now: float | None = None) -> di
         out[person] = {**spot, "act": label_act or act, "label": REST_LABEL[label_act or act]}
         return True
 
-    if time.localtime(now).tm_hour in LUNCH_HOURS:
+    from app.office import schedule as _sched
+    lunch = _sched.lunch_hours(now) or LUNCH_HOURS
+    # 퇴근: nobody rests in the office — build_office marks them away (hidden).
+    if _sched.off_reason(now):
+        return out
+    # 사장 있으면 노는 사람 없음 — 전원 자기 자리.
+    from app.office import boss as _boss
+    if _boss.state().get("present"):
+        for person in order:
+            put(person, "desk")
+        return out
+    if time.localtime(now).tm_hour in lunch:
         for person in order:
             put(person, "snack", "lunch") or put(person, "chat", "lunch") or put(person, "coffee", "lunch")
         return out
@@ -344,6 +383,7 @@ def _roster_row(p: dict, lounge: dict) -> dict[str, Any]:
     return {
         "id": p["id"], "name": p["name"], "team": p["team"], "title": p["title"], "office": p["office"],
         "name_ko": p.get("name_ko", ""), "name_ja": p.get("name_ja", ""), "name_en": p.get("name_en", ""), "full": full_name(p), "lead": bool(p.get("lead")),
+        "temp": bool(p.get("temp")),
         "team_name": TEAM_INFO[p["team"]]["name"],
         "dept": f"{TEAM_INFO[p['team']]['name']} · {p['title']}",
         "agent": TEAM_INFO[p["team"]]["work"],
@@ -358,7 +398,7 @@ def _roster_row(p: dict, lounge: dict) -> dict[str, Any]:
 
 
 def _roster(o: str) -> list[dict[str, Any]]:
-    people = STAFF.get(o, ())
+    people = _live_staff(o)
     return [_roster_row(p, dict(_chat(o)[i % len(_chat(o))])) for i, p in enumerate(people)]
 
 
@@ -366,6 +406,15 @@ ROSTER = _PerOffice(_roster)
 ALL_ROSTER = {row["id"]: row for o in STAFF for row in _roster(o)}
 # Kept for older callers: zones are people now.
 ZONES = ROSTER
+
+
+def rebuild_staff_caches() -> None:
+    """Clear per-office caches after hire/fire so map · 사원 팝 · 회의 풀이 맞춰진다."""
+    global ALL_PEOPLE, ALL_ROSTER
+    for obj in (PEOPLE, TEAMS, LEADERS, LOUNGE, PEOPLE_SEAT, PEOPLE_SEX, ROSTER):
+        getattr(obj, "_cache", {}).clear()
+    ALL_PEOPLE = tuple(p for o in STAFF for p in _live_staff(o))
+    ALL_ROSTER = {row["id"]: row for o in STAFF for row in _roster(o)}
 
 
 # Office background picture (static/office/floor.*). When present it replaces the CSS-drawn
@@ -485,10 +534,30 @@ def write_flow(**changes: Any) -> dict[str, Any]:
     return data
 
 
+def _person_office_id(person: str) -> str:
+    for p in ALL_PEOPLE:
+        if p["id"] == person:
+            return str(p.get("office") or "")
+    from app.office import schedule
+    for who, a in schedule.alba_assignments().items():
+        if a["id"] == person:
+            return str(a.get("office") or _person_office_id(who))
+    return ""
+
+
 def staff_by_role(person: str) -> dict[str, Any]:
     """Anyone on any floor (the event feed and jobs can name people of the other floor)."""
     if person in ALL_ROSTER:
         return dict(ALL_ROSTER[person])
+    from app.office import schedule
+    for a in schedule.alba_assignments().values():
+        if a["id"] == person:
+            row = schedule.staff_row(a)
+            return _roster_row(row, dict(row.get("seat") or {"x": 50, "y": 50}))
+    alba = schedule.alba_by_id(person)
+    if alba:
+        row = schedule.staff_row(alba)
+        return _roster_row(row, dict(row.get("seat") or {"x": 50, "y": 50}))
     return {"id": person, "name": person, "team": "", "title": "", "dept": "", "agent": "", "tone": "",
             "avatar": "", "face": "", "sprite": "", "desk": {"x": 50, "y": 50}, "lounge": {"x": 50, "y": 50}}
 
@@ -496,7 +565,8 @@ def staff_by_role(person: str) -> dict[str, Any]:
 def team_members(team: str) -> tuple[str, ...]:
     if is_borrowed():   # B1: the same team of every other floor
         return tuple(p["id"] for oid, people in STAFF.items() if not is_borrowed(oid) for p in people if p["team"] == team)
-    return TEAMS.get(team, ())
+    from app.office import schedule
+    return tuple(schedule.available_members(TEAMS.get(team, ())))
 
 
 LAST_ASSIGNED: dict[str, float] = {}   # person → when they were last handed work (jobs.start)
@@ -615,9 +685,10 @@ def waiting_work(snap: dict[str, Any], flow: dict[str, Any] | None = None) -> di
     if contentkit.is_companydb():   # the add-queue counts as ready topics there
         from app.content import cdbcontent
         picks += cdbcontent.queue_picks()
-    if picks:
+    # content:"" sites (sitekpi · krcare) have no write/search pipeline
+    if picks and sites.current().can_write:
         out["write"] = "추천 " + sites.picks_text(picks)
-    if int(search.get("shown_count") or 0) and not search.get("backlog_off"):
+    if (sites.current().can_polish or sites.current().can_write) and int(search.get("shown_count") or 0) and not search.get("backlog_off"):
         out["search"] = f"고칠 검색 글 {search.get('shown_count')}편"
     open_pr = pr is not None and not flow.get("merged")
     if git.get("dirty") and not open_pr:
@@ -630,7 +701,8 @@ def waiting_work(snap: dict[str, Any], flow: dict[str, Any] | None = None) -> di
         out["review"] = f"PR #{pr.get('number')} 고칠 게 있어요{kind}"
     elif open_pr:
         out["review"] = f"PR #{pr.get('number')} 머지 차례"
-    if flow.get("merged") and not flow.get("deployed"):
+    # Merged + dirty → next PR first (do not also show 「올릴 차례」 or the floor looks stuck twice).
+    if flow.get("merged") and not flow.get("deployed") and not git.get("dirty"):
         out["deploy"] = "머지됨 · 올릴 차례"
     return out
 
@@ -655,55 +727,120 @@ def build_office(
     except Exception:  # noqa: BLE001
         in_queue = {}
 
+    from app.office import schedule
     occupied: dict[str, dict[str, Any]] = {}
     seats: dict[str, dict[str, Any]] = {}
-    away: dict[str, str] = {}   # gone down to B1: not on this floor until the work there ends
+    away: dict[str, str] = {}   # B1 borrow, vacation, 퇴근 …
+    alba_at: dict[str, str] = {}  # vacationer id → alba id sitting at their desk
+    off = schedule.off_reason()  # 퇴근(또는 workdays 밖) → empty office (sprites hidden via away)
+    # Vacations: hide the person; alba may cover only during work hours.
+    for who, alba in schedule.alba_assignments().items():
+        if _person_office_id(who) != _here():
+            continue
+        away[who] = schedule.vacation_label(who) or "휴가"
+        if not off:
+            alba_at[who] = alba["id"]
+    for who in [r["id"] for r in ROSTER]:
+        if schedule.on_vacation(who) and who not in away:
+            away[who] = schedule.vacation_label(who) or "휴가"
     for person, j in running.items():
+        covering = ""
         if person not in DESKS:
-            continue
+            # Alba working: sit at the covered desk (work hours only)
+            asg = next((w for w, a in schedule.alba_assignments().items() if a["id"] == person), "")
+            if off or not asg or _person_office_id(asg) != _here():
+                continue  # other-floor visitors are appended after zones
+            covering = asg
         jo = _job_office(j)
-        if jo and jo != _here() and is_borrowed(jo):
-            away[person] = f"{sites.OFFICES[jo].floor_label} · {_site_label(str(j.get('site') or ''))}"
+        if person in DESKS and jo and jo != _here():
+            # Home desk empty: this person went to another floor (리더 회의 · B1 · …)
+            label = sites.OFFICES[jo].floor_label if jo in sites.OFFICES else jo
+            away[person] = f"{label} · {_site_label(str(j.get('site') or ''))}"
             continue
+        if off and not covering:
+            # Still finishing a job after hours: leave them visible; others stay away.
+            pass
         line = str(j.get("line") or "")
         state = str(j.get("state") or "") or _state_from_line(line)
-        occupied[person] = _seat(person, state, line or "작업 중", str(j.get("task") or ""), site=str(j.get("site") or ""))
-        seats[person] = j.get("seat") or DESKS[person]
+        slot = covering or person
+        occupied[slot] = _seat(person, state, line or "작업 중", str(j.get("task") or ""), site=str(j.get("site") or ""))
+        seats[slot] = j.get("seat") or (DESKS.get(covering) if covering else None) or DESKS.get(person) or {"x": 50, "y": 50}
+        if covering:
+            away.pop(covering, None)  # alba is visibly at the desk
+    if off:
+        for r in ROSTER:
+            if r["id"] not in occupied:
+                away[r["id"]] = off
     # Queued work: shown on a free member of the team that owns it. No ▶ when someone already does
     # that kind of work (the button would be refused anyway). If the execution queue already has
     # this task, show status text only — don't offer ▶ 리뷰·머지 again.
     here = sites.current_id()
     busy_groups = {task_group(str(j.get("task") or "")) for j in running.values()
                    if j.get("task") and (j.get("site") or sites.DEFAULT_SITE) == here}
-    for task, line in waiting.items():
-        if task in OPTIONAL_TASKS:
-            continue
-        if task_group(task) in busy_groups:   # someone is already on it (a hand-off in progress): no "대기" bubble
-            continue
-        for person in ordered_members(task):
-            if person not in occupied and person not in away:
-                if task in in_queue:
-                    from app.work import workqueue
-                    msg = workqueue.pending_label(in_queue[task])
-                    occupied[person] = _seat(person, "think", msg, task, run="")
-                else:
-                    run = "" if (task_group(task) in busy_groups and task not in ITEM_TASKS) else run_label(task, line)
-                    occupied[person] = _seat(person, "idle", line, task, run)
-                seats[person] = DESKS[person]
-                break
+    if not off:
+        for task, line in waiting.items():
+            if task in OPTIONAL_TASKS:
+                continue
+            if task_group(task) in busy_groups:   # someone is already on it (a hand-off in progress): no "대기" bubble
+                continue
+            for person in ordered_members(task):
+                if person not in occupied and person not in away:
+                    if task in in_queue:
+                        from app.work import workqueue
+                        msg = workqueue.pending_label(in_queue[task])
+                        occupied[person] = _seat(person, "think", msg, task, run="")
+                    else:
+                        run = "" if (task_group(task) in busy_groups and task not in ITEM_TASKS) else run_label(task, line)
+                        occupied[person] = _seat(person, "idle", line, task, run)
+                    seats[person] = DESKS[person]
+                    break
 
-    rest = rest_plan([r["id"] for r in ROSTER if r["id"] not in occupied and r["id"] not in away])
+        # Idle alba cover: sit at the vacationer's desk with a 대행 bubble.
+        for who, alba_id in alba_at.items():
+            if who in occupied or who not in {r["id"] for r in ROSTER}:
+                continue
+            if any(p == alba_id for p, j in running.items() if j):
+                continue
+            vname = staff_by_role(who).get("name") or who
+            occupied[who] = _seat(alba_id, "idle", f"알바 · {vname} 대행", "", site="")
+            seats[who] = DESKS.get(who) or {"x": 50, "y": 50}
+            away.pop(who, None)
+
+    rest = rest_plan([r["id"] for r in ROSTER
+                      if r["id"] not in occupied and r["id"] not in away
+                      and not schedule.on_vacation(r["id"])])
     zones = [
-        {**row, "desk": seats.get(row["id"], row["desk"]), "empty": row["id"] not in occupied,
+        {**row, "desk": seats.get(row["id"], row["desk"]),
+         "empty": row["id"] not in occupied and row["id"] not in away,
          "person": occupied.get(row["id"]), "rest": rest.get(row["id"]), "away": away.get(row["id"], "")}
         for row in ROSTER
     ]
+    # Leaders (and anyone else) visiting this floor for a meeting or job
+    if not off:
+        lay = layout()
+        hot = list(lay.get("hot") or ())
+        entry = dict(lay.get("entry") or {"x": 50, "y": 50})
+        vi = 0
+        for person, j in visitors(running=running).items():
+            if person in occupied or any(z["id"] == person for z in zones):
+                continue
+            line = str(j.get("line") or "")
+            state = str(j.get("state") or "") or _state_from_line(line)
+            desk = j.get("seat") or (dict(hot[vi % len(hot)]) if hot else entry)
+            vi += 1
+            base = dict(ALL_ROSTER.get(person) or staff_by_role(person))
+            row = {**base, "desk": desk, "lounge": entry, "visitor": True}
+            person_seat = _seat(person, state, line or "작업 중", str(j.get("task") or ""), site=str(j.get("site") or ""))
+            occupied[person] = person_seat
+            zones.append({**row, "empty": False, "rest": None, "away": "", "person": person_seat})
     plates = []
     for team, info in TEAM_INFO.items():
         members = TEAMS[team]
         busy = [occupied[m] for m in members if m in occupied and occupied[m]["state"] == "work"]
         idle = [occupied[m] for m in members if m in occupied and occupied[m]["state"] != "work"]
-        if len(busy) > 1:
+        if off:
+            line = schedule.team_off_quip(team)
+        elif len(busy) > 1:
             line = f"{len(busy)}명 작업 중"
         elif busy:
             line = busy[0]["line"]
@@ -712,7 +849,8 @@ def build_office(
         else:
             line = info["work"]
         plates.append({"team": team, "label": info["name"], "step": info["step"], "x": PLATES[team]["x"],
-                       "y": PLATES[team]["y"], "busy": bool(busy), "line": line, "size": len(members)})
+                       "y": PLATES[team]["y"], "busy": bool(busy), "line": line, "size": len(members),
+                       "off_note": bool(off)})
 
     working = [occupied[r] for r in running if r in occupied]
     if working:
@@ -721,10 +859,18 @@ def build_office(
     elif any(t not in OPTIONAL_TASKS for t in waiting):
         task, line = next((t, l) for t, l in waiting.items() if t not in OPTIONAL_TASKS)
         next_up = f"{TEAM_INFO[TASK_TEAM.get(task, 'plan')]['name']} · {line}"
+    elif off == "퇴근":
+        next_up = "퇴근 · 사무실 비움"
     elif any(r["act"] == "lunch" for r in rest.values()):
         next_up = "점심시간"
     else:
         next_up = "모두 쉬는 중"
+    vac_notice = schedule.vacation_notice(_here())
+    hours_note = schedule.hours_notice()
+    if hours_note:
+        next_up = hours_note
+    elif vac_notice and next_up == "모두 쉬는 중":
+        next_up = vac_notice
 
     feed = read_events()
     now_rows = [{"at": "지금", "who": p["name"], "role": p["role"], "face": (ALL_ROSTER.get(p["role"]) or {}).get("face", ""),
@@ -768,6 +914,8 @@ def build_office(
         "floor_front": floor_front(),
         "teams": {k: list(v) for k, v in TEAMS.items()},
         "borrow": False,
+        "vacation_notice": vac_notice,
+        "hours_notice": hours_note,
     }
 
 
@@ -813,6 +961,7 @@ def _build_borrowed(snap: dict[str, Any], job: dict[str, Any] | None, flow: dict
     feed = _with_faces([{**row, "site_label": row.get("site_label") or _site_label(str(row.get("site") or ""))}
                         for row in now_rows + read_events()])
     off = sites.office_of()
+    from app.office import schedule as _sched
     return {
         "roster": roster, "zones": zones, "plates": plates, "feed": feed[:12], "next_up": next_up,
         "busy": len(working), "present": len(working), "active": working[0] if working else None,
@@ -822,6 +971,8 @@ def _build_borrowed(snap: dict[str, Any], job: dict[str, Any] | None, flow: dict
         "teams": {t: [r["id"] for r in roster if r["team"] == t] for t in lay["plates"]},
         "borrow": True, "max_visitors": int(lay.get("max_visitors", 2)),
         "everyone": list(ALL_ROSTER.values()),   # pages name whoever is next in turn, from any floor
+        "vacation_notice": "",  # B1 has no fixed staff vacations on this map
+        "hours_notice": _sched.hours_notice(),
     }
 
 
@@ -896,4 +1047,5 @@ def staff_directory(jobs_now: dict[str, Any] | None = None) -> list[dict[str, An
         floors.append({"id": oid, "name": off.name, "floor": off.floor, "floor_label": off.floor_label, "blurb": off.blurb,
                        "teams": teams, "count": sum(len(t["members"]) for t in teams), "busy": sum(t["busy"] for t in teams),
                        "sites": [sites.SITES[s] for s in off.sites if s in sites.SITES]})
+    floors.sort(key=lambda f: (f["floor"] < 1, f["floor"], f["id"]))  # 1층 · 2층 · B1
     return floors

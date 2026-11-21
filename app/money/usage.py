@@ -31,6 +31,8 @@ LABELS = {
     "post:site_ship_deploy": "배포",
     "post:site_write": "글 쓰기",
     "post:site_write_research": "트렌드 리서치",
+    "post:site_write_queue": "회사 찾기",
+
     "post:site_search": "검색 고치기",
     "post:site_search_analyze": "GA4·GSC 분석",
     "post:site_polish": "다듬기",

@@ -1,33 +1,67 @@
-"""B1 Back Office: no people of its own; free people from upstairs come down for its work."""
+"""B1 Task Force: SiteKPI 전용 · 임시 사원 상주 (borrow 아님)."""
 from app.office import jobs
+from app.office import meeting
+from app.work import planning
 from app import office
 from app import sites
-def test_b1_is_a_borrowed_floor():
+
+
+def test_b1_is_task_force_with_own_staff():
     off = sites.OFFICES["basement"]
-    assert off.floor == -1 and off.floor_label == "B1" and "krcare" in off.sites
-    with sites.use("krcare"):
-        assert office.is_borrowed() and not sites.current().can_write   # 관리 · SEO only, no writing
+    assert off.floor == -1 and off.floor_label == "B1" and off.name == "Task Force"
+    assert "sitekpi" in off.sites and "krcare" not in off.sites
+    assert sites.SITES["krcare"].office == "datalab"
+    with sites.use("sitekpi"):
+        assert not office.is_borrowed()
+        assert not sites.current().can_write
+        assert len(office.PEOPLE) == 4
+        assert {p["id"] for p in office.PEOPLE} == {"tf_rio", "tf_mina", "tf_noa", "tf_jun"}
+        assert all(p.get("temp") for p in office.PEOPLE)
+        assert office.MEETING_SEATS and office.LEADER_SEATS
+        ob = office.build_office({"sitekpi": {}}, {}, {})
+        assert not ob["borrow"] and ob["floor_label"].startswith("B1")
+        assert {z["id"] for z in ob["zones"]} == {"tf_rio", "tf_mina", "tf_noa", "tf_jun"}
+
+
+def test_b1_tf_members_do_their_own_team_work():
+    jobs.JOBS.clear()
+    with sites.use("sitekpi"):
+        assert office.ordered_members("research") == ["tf_rio"]
+        assert office.ordered_members("search") == ["tf_mina"]
+        assert office.ordered_members("images") == ["tf_noa"]
+        assert office.ordered_members("issue") == ["tf_rio"]  # TF has its own planner (not borrow→dev)
+        assert office.ordered_members("review") == ["tf_jun"]
     with sites.use("okpy"):
         assert not office.is_borrowed()
-
-
-def test_b1_work_goes_to_free_people_from_upstairs_at_most_two():
+        assert "tf_rio" not in [p["id"] for p in office.PEOPLE]
     jobs.JOBS.clear()
-    with sites.use("krcare"):
-        search = office.ordered_members("search")
-        assert search and all(office.staff_by_role(p)["team"] == "mkt" for p in search)
-        assert {office.staff_by_role(p)["office"] for p in office.team_members("mkt")} == {"datalab", "playground"}
-        assert all(office.staff_by_role(p)["team"] == "dev" for p in office.ordered_members("issue"))   # no planners on B1
-        seat = office.work_seat("search", search[0], [])
-        assert seat in [dict(s) for s in office.layout()["hot"]]
-        jobs.JOBS["minjae"] = {"running": True, "site": "krcare", "task": "search", "line": "검색 글 고치는 중", "seat": seat}
-        jobs.JOBS["kenta"] = {"running": True, "site": "krcare", "task": "review", "line": "리뷰 중"}
-        assert office.ordered_members("images") == []                      # two are down already: B1 is full
-        ob = office.build_office({"krcare": {}}, jobs.all_jobs(), {})
-        assert ob["borrow"] and {r["id"] for r in ob["roster"]} == {"minjae", "kenta"}
-        assert ob["floor_label"].startswith("B1")
+
+
+def test_b1_meeting_focus_and_labels_differ_from_1f():
     with sites.use("okpy"):
-        ob = office.build_office({"okpy": {}}, jobs.all_jobs(), {})
-        away = {z["id"]: z["away"] for z in ob["zones"] if z["away"]}
-        assert away == {"minjae": "B1 · KR Care"}                          # not shown on 1층 while downstairs
+        assert planning.focus_map() == planning.FOCUS
+        assert meeting.mode_label("all") == "전사 회의 (회의실 A)"
+        assert meeting.mode_kind("all") == "전사"
+        assert meeting.team_topic("plan") == meeting.TEAM_TOPIC["plan"]
+        assert "개발팀" in meeting.role_view("daeun")
+    with sites.use("sitekpi"):
+        assert meeting.is_tf()
+        assert planning.focus_map() == planning.TF_FOCUS
+        assert set(planning.TF_FOCUS) == {"all", "money", "ux", "feature"}
+        assert "수익화" in planning.TF_FOCUS["money"]
+        assert meeting.mode_label("all") == "TF 스탠드업 (탁자)"
+        assert meeting.mode_kind("all") == "TF"
+        assert meeting.mode_room("all") == "TF 탁자"
+        assert meeting.team_topic("plan") == meeting._TF_TEAM_TOPIC["plan"]
+        assert "제품 로드맵" in meeting.role_view("tf_rio")
+        assert meeting._topic_line("ux", "", "all") == planning.TF_FOCUS["ux"]
+
+
+def test_b1_rejects_leaders_and_boss_meetings():
+    """다른 층 사원·리더를 B1으로 부르지 않음."""
+    jobs.JOBS.clear()
+    with sites.use("sitekpi"):
+        assert meeting.start("all", "", "leaders") == []
+        assert meeting.start("all", "", "boss") == []
+        assert meeting._TF_BLOCKED == frozenset({"leaders", "boss"})
     jobs.JOBS.clear()

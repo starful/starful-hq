@@ -1,0 +1,101 @@
+{#- 제휴 메일 — 현황 ss-actions 칩 + 팝업.
+   Needs: items, summary, has_email, from_mail, market, noun, noun_col, site_id,
+          collect_pending, collect_pending_label,
+          floor_label, floor_site_count, floor_per_limit
+-#}
+<span class="ps-mount" id="ps-card"
+      data-url="{{ url_for('site_partners') }}"
+      data-collect-url="{{ url_for('site_partners_collect') }}"
+      data-has-email="{{ has_email or '' }}">
+    <button type="button" class="ss-partners-btn ps-open" data-ps-open
+            title="{{ market }} {{ noun }} 메일 {{ summary.with_email }}/{{ summary.total }}">메일 목록 보기</button>
+    <dialog class="ps-dlg" id="ps-dlg" aria-labelledby="ps-h">
+        <div class="ps-top">
+            <h2 id="ps-h">{{ noun }} 제휴 메일 · {{ market }}</h2>
+            <span class="ps-sub">공개 연락처 · {{ from_mail }} · {{ summary.with_email }}/{{ summary.total }}</span>
+            <span class="ps-gap"></span>
+            <nav class="ps-period" aria-label="필터">
+                <button type="button" data-ps-mail="" aria-pressed="{{ 'true' if not has_email else 'false' }}">전체</button>
+                <button type="button" data-ps-mail="1" aria-pressed="{{ 'true' if has_email == '1' else 'false' }}">메일 있음</button>
+                <button type="button" data-ps-mail="0" aria-pressed="{{ 'true' if has_email == '0' else 'false' }}">메일 없음</button>
+            </nav>
+            <button type="button" class="ps-x" data-ps-close aria-label="닫기">×</button>
+        </div>
+        <div class="ps-main">
+            <div class="ps-stats">
+                <span>표시 {{ items | length }}</span>
+                <span class="ok">메일 {{ summary.with_email }}</span>
+                <span>미수집 {{ summary.without_email }}</span>
+                {% if summary.last_collect_at %}
+                <span title="최근 수집">수집 {{ summary.last_collect_at[5:16] }} · 찾음 {{ summary.last_collect_found }}/{{ summary.last_collect_tried }}</span>
+                {% else %}
+                <span>수집 기록 없음</span>
+                {% endif %}
+            </div>
+            <div class="ps-collect">
+                {% if collect_pending %}
+                <button type="button" class="act small" disabled>{{ collect_pending_label }}</button>
+                {% elif summary.collect_pending %}
+                <button type="button" class="act small" data-ps-collect
+                        title="이 사이트만 · 웹사이트 있는 곳 · 최대 {{ summary.collect_limit }}곳">
+                    이 사이트만 수집 · {{ summary.collect_pending }}곳 (최대 {{ summary.collect_limit }})
+                </button>
+                {% elif summary.need_website %}
+                <button type="button" class="act small" data-ps-collect
+                        title="웹사이트 없는 곳은 Places로 공식 사이트부터 찾은 뒤 메일 수집">
+                    이 사이트만 수집 · 웹사이트 먼저 찾기 (최대 {{ summary.collect_limit }})
+                </button>
+                {% else %}
+                <button type="button" class="act small" disabled>메일 없는 곳 없음</button>
+                {% endif %}
+                {% if floor_site_count > 1 %}
+                <span class="ps-note">층 전체는 층 메뉴 「{{ floor_label }} 메일 수집 맡기기」(사이트당 최대 {{ floor_per_limit }})</span>
+                {% else %}
+                <span class="ps-note">공개 문의 페이지만 · URL 없는 곳은 시도로 세지 않음</span>
+                {% endif %}
+            </div>
+            <div class="ps-scroll">
+                <table class="ps-table">
+                    <thead>
+                        <tr>
+                            <th>{{ noun_col }}</th>
+                            <th style="width:20em">메일</th>
+                            <th style="width:9em">수집</th>
+                            <th>출처</th>
+                            <th style="width:8em">메모</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for s in items %}
+                        <tr class="{% if not s.email %}no-mail{% endif %}">
+                            <td>
+                                <b>{{ s.name }}</b>
+                                {% if s.activity %}<div class="ps-note">{{ s.activity }}</div>{% endif %}
+                                {% if s.name_ko and s.name_ko != s.name %}<div class="ps-note">{{ s.name_ko }}</div>{% endif %}
+                                {% if s.name_ja and s.name_ja != s.name %}<div class="ps-note">{{ s.name_ja }}</div>{% endif %}
+                            </td>
+                            <td class="ps-mail">
+                                {% if s.email %}
+                                <a href="mailto:{{ s.email }}">{{ s.email }}</a>
+                                <button type="button" class="ps-copy" data-ps-copy="{{ s.email }}">복사</button>
+                                {% else %}—{% endif %}
+                            </td>
+                            <td class="ps-when">
+                                {% if s.collected_at %}
+                                <span title="{{ s.collected_at }}">찾음 {{ s.collected_at[5:16] }}</span>
+                                {% elif s.collect_tried_at %}
+                                <span class="ps-tried" title="{{ s.collect_tried_at }}">시도 {{ s.collect_tried_at[5:16] }}</span>
+                                {% else %}—{% endif %}
+                            </td>
+                            <td class="ps-src">{% if s.source_url %}<a href="{{ s.source_url }}" target="_blank" rel="noopener">{{ s.source_url }}</a>{% else %}—{% endif %}</td>
+                            <td class="ps-note">{{ s.note or '' }}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="5" class="ps-note">이 필터에 맞는 {{ noun }}이(가) 없어요.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </dialog>
+</span>

@@ -8,18 +8,23 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from app import snapshot
+from app.paths import DATA
 _CACHE: dict[str, Any] = {"at": 0.0, "rows": []}
 _LOCK = threading.Lock()
 TTL = 120
+_HALT_PATH = DATA / "claude_halt.json"
+_HALT_LOCK = threading.Lock()
 
 
 def _okadmin_import() -> None:
@@ -28,6 +33,81 @@ def _okadmin_import() -> None:
     path = str(snapshot.OKADMIN_ROOT)
     if path not in sys.path:
         sys.path.insert(0, path)
+
+
+def claude_blocked() -> tuple[bool, str]:
+    """True when Claude 5h/weekly session is at the limit (level=over or ≥100%)."""
+    try:
+        from app.money import costs
+        info = costs.claude_limits()
+    except Exception:  # noqa: BLE001
+        return False, ""
+    for w in info.get("windows") or []:
+        if not isinstance(w, dict):
+            continue
+        pct = float(w.get("percent") or 0)
+        level = str(w.get("level") or "")
+        if level == "over" or pct >= 99.5:
+            label = str(w.get("label") or "세션")
+            when = str(w.get("resets_in") or w.get("resets") or "").strip()
+            tip = f"{when} 후" if when else "한도 풀린 뒤"
+            return True, f"Claude {label} 한도 · {tip} 다시"
+    return False, ""
+
+
+def is_claude_limit_error(err: Any) -> bool:
+    low = str(err or "").lower()
+    return any(x in low for x in (
+        "session limit", "usage limit", "rate limit", "사용 한도", "session/usage limit",
+        "hit your session limit", "you've hit your",
+    ))
+
+
+def halt_claude_limit(reason: str = "") -> str:
+    """Stop autoship on every floor + pause every site queue until a person turns them back on."""
+    from app import sites
+    from app.work import autoship, workqueue
+
+    blocked, why = claude_blocked()
+    msg = reason or why or "Claude 사용 한도"
+    with _HALT_LOCK:
+        DATA.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "reason": msg[:240],
+            "autoship_off": True,
+            "queues_paused": True,
+        }
+        _HALT_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    for oid in sites.OFFICES:
+        try:
+            autoship.set_enabled(False, office_id=oid)
+        except Exception as exc:  # noqa: BLE001
+            print(f"halt autoship {oid}: {exc}")
+    for s in sites.enabled():
+        try:
+            with sites.use(s.id):
+                workqueue.set_paused(True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"halt queue {s.id}: {exc}")
+    with _LOCK:
+        _CACHE["at"] = 0.0
+    return f"Claude 한도로 자동 진행·실행 큐를 멈췄어요 · {msg}"
+
+
+def clear_claude_halt() -> None:
+    try:
+        _HALT_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def claude_halt_info() -> dict[str, Any] | None:
+    try:
+        data = json.loads(_HALT_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
 
 
 def _claude() -> dict[str, Any]:
@@ -41,6 +121,14 @@ def _claude() -> dict[str, Any]:
                 "fix": "CLAUDE_BIN을 okadmin/.env에 적거나 PATH에 claude를 두세요"}
     if not claude_cli_ready():
         return {"ok": False, "detail": "로그인 안 됨", "fix": "아래 'Claude 로그인' 버튼", "login": True}
+    blocked, why = claude_blocked()
+    if blocked:
+        return {
+            "ok": False,
+            "detail": why,
+            "fix": "층 메뉴에서 자동 진행·실행 큐를 한도 풀린 뒤 다시 켜 주세요",
+            "limit": True,
+        }
     return {"ok": True, "detail": "구독 로그인됨"}
 
 
@@ -111,6 +199,11 @@ def status(refresh: bool = False) -> list[dict[str, Any]]:
 
 def need(*keys: str) -> None:
     """Raise a plain message when a tool this job needs isn't ready (checked fresh)."""
+    if "claude" in keys:
+        blocked, why = claude_blocked()
+        if blocked:
+            halt_claude_limit(why)
+            raise RuntimeError(f"Claude CLI: {why}. 자동 진행·큐를 멈춰 두었어요")
     by_id = {r["id"]: r for r in status(refresh=True)}
     for key in keys:
         row = by_id.get(key) or {}

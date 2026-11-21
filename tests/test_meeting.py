@@ -26,7 +26,7 @@ def test_everyone_free_meets_and_the_result_is_saved(tmp_path, monkeypatch):
     gate = threading.Event()
     jobs.start("hajun", "일하는 중", lambda w: (gate.wait(5), "ok")[1], _task="refactor_front")
     came = meeting.start("feature", "")
-    assert "hajun" not in came and len(came) == 12
+    assert "hajun" not in came and len(came) == 7  # 1층 8명 − 바쁜 1명
     assert all(jobs.get(r).get("seat") in office.MEETING_SEATS for r in came)
     assert meeting.start() == []  # one meeting at a time
     for _ in range(50):
@@ -36,10 +36,10 @@ def test_everyone_free_meets_and_the_result_is_saved(tmp_path, monkeypatch):
     time.sleep(0.3)
     saved = planning.read()
     assert calls == ["daeun"]  # one call, the leader ranks
-    assert saved["meeting"] and saved["headline"] == "결론" and len(saved["ideas"]) == 12  # one idea per person
+    assert saved["meeting"] and saved["headline"] == "결론" and len(saved["ideas"]) == 7  # one idea per person
     assert [i["who"] for i in saved["ideas"][:2]] == ["minjae", "jiho"] and saved["ideas"][0]["rank"] == 1
-    assert saved["office"] and saved["sites"] == ["okpy", "jpcampus", "krcampus", "companydb"]          # 전사 회의 = every site of the office
-    assert all(i["site"] in ("okpy", "jpcampus", "krcampus", "companydb") for i in saved["ideas"])
+    assert saved["office"] and saved["sites"] == ["okpy", "jpcampus", "krcampus", "companydb", "krcare"]  # 전사 = 1층 전부
+    assert all(i["site"] in ("okpy", "jpcampus", "krcampus", "companydb", "krcare") for i in saved["ideas"])
     assert "## 우선순위" in planning.file_of(saved["id"], ".md").read_text()
     assert planning.history()[0]["office"]
     assert jobs.get("jiho")["line"].startswith("회의 끝")
@@ -85,7 +85,7 @@ def test_leaders_meet_in_room_b_with_two_ideas_each(tmp_path, monkeypatch):
                 "ranking": ["haneul-2", "daeun"], "headline": "리더 결론"}
     monkeypatch.setattr(meeting, "_ask_all", fake_all)
     came = meeting.start("all", "", "leaders", "어필리 수익 늘리기")
-    assert set(came) == set(office.LEADERS)
+    assert set(came) == set(office.company_leaders())
     assert all(jobs.get(r).get("seat") in office.LEADER_SEATS for r in came)
     for _ in range(50):
         if not meeting.running("leaders"):
@@ -114,9 +114,9 @@ def test_boss_calls_up_to_five_people_to_the_ceo_office(tmp_path, monkeypatch):
         seen.update(per=per, topic=topic, kind=kind, n=len(members))
         return {"ideas": [{"who": m, "key": f"{m}-1", "title": f"{m} 1"} for m in members], "headline": "사장실 결론"}
     monkeypatch.setattr(meeting, "_ask_all", fake_all)
-    want = ["seoyeon", "jiho", "yuna", "minjae", "subin", "haneul", "nobody"]
+    want = ["seoyeon", "jiho", "minjae", "subin", "haneul", "mio", "nobody"]
     came = meeting.start("all", "", "boss", "", want)
-    assert came == ["seoyeon", "jiho", "yuna", "minjae", "subin"]   # five chairs; Taekki takes the sixth
+    assert came == ["seoyeon", "jiho", "minjae", "subin", "haneul"]   # five chairs; Taekki takes the sixth
     assert all(jobs.get(r).get("seat") in office.BOSS_TABLE[:5] for r in came)
     for _ in range(50):
         if not meeting.running("boss"):
@@ -134,18 +134,30 @@ def test_boss_login_rules(tmp_path, monkeypatch):
     monkeypatch.setattr(boss, "CONFIG_PATH", tmp_path / "boss.json")
     monkeypatch.setattr(boss, "STATE_PATH", tmp_path / "state.json")
     assert boss.is_boss("Starful0418@gmail.com") and not boss.is_boss("someone@example.com") and not boss.is_boss("")
+    assert boss.callback_uri(8091) == "http://127.0.0.1:8091/oauth/callback"
     client = flask_app.test_client()
+    # Local one-click login (no Google).
+    r = client.get("/login", follow_redirects=False)
+    assert r.status_code in (302, 303)
     with client.session_transaction() as s:
-        s["boss_email"] = "starful0418@gmail.com"
+        assert s.get("boss_email") == "starful0418@gmail.com"
     called = []
     from app.office import jobs as jobs_mod
     monkeypatch.setattr(jobs_mod, "start_task", lambda *a, **k: called.append(a[0]) or "x")
-    assert client.post("/site/okpy/ship").status_code == 403          # deploy
-    assert client.post("/site/okpy/run/review", headers={"X-Requested-With": "fetch"}).status_code == 403
-    assert called == []
+    # Boss login must not block PR · merge · deploy (or any other feature).
+    ship = client.post("/site/okpy/ship")
+    assert ship.status_code != 403
+    rev = client.post("/site/okpy/run/review", headers={"X-Requested-With": "fetch"})
+    assert rev.status_code != 403
+    assert called  # start_task reached (not refused by boss gate)
     assert client.post("/boss/move", json={"x": 50, "y": 60}).get_json() == {"ok": True}
     st = client.get("/office").get_json()["boss"]
     assert st["me"] and st["present"] and st["pos"] == {"x": 50.0, "y": 60.0}
+    # After-hours notice for the boss.
+    from app.office import schedule
+    monkeypatch.setattr(schedule, "off_reason", lambda now=None: "퇴근")
+    home = client.get("/").get_data(as_text=True)
+    assert "사장님도 퇴근해 주세요" in home
     client.get("/logout")
     assert client.post("/boss/move", json={"x": 1, "y": 1}).status_code == 403
 

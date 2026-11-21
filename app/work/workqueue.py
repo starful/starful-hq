@@ -311,13 +311,8 @@ def enqueue_meeting(pid: str, site_id: str | None = None) -> int:
         if kind == "none" or not actions.ACTION_LABEL.get(kind):
             continue
         sid = idea.get("site") if idea.get("site") in sites.SITES else (site_id or sites.current_id())
-        hold, hold_reason = False, ""
-        if kind == "feature":
-            with sites.use(sid):
-                from app import office
-                flow = office.read_flow()
-                if flow.get("pr") and not flow.get("merged"):
-                    hold, hold_reason = True, f"열린 PR #{(flow.get('pr') or {}).get('number')} 머지 후"
+        hold_reason = actions.pr_hold_reason(kind, sid)
+        hold = bool(hold_reason)
         row = enqueue(
             {
                 "source": "meeting",
@@ -342,6 +337,8 @@ def enqueue_meeting(pid: str, site_id: str | None = None) -> int:
 
 def enqueue_task(task: str, label: str = "") -> dict[str, Any] | None:
     """Queue a status-tab waiting task (issue / review / deploy / write / search)."""
+    from app.work import actions
+    hold_why = actions.pr_hold_reason(task)
     row = enqueue(
         {
             "source": "task",
@@ -349,6 +346,8 @@ def enqueue_task(task: str, label: str = "") -> dict[str, Any] | None:
             "title": label or task,
             "label": label or task,
             "site": sites.current_id(),
+            "hold": bool(hold_why),
+            "hold_reason": hold_why,
         }
     )
     if row:
@@ -377,8 +376,9 @@ def _mark(item_id: str, **changes: Any) -> None:
 
 
 def _release_held() -> None:
-    """Open-PR holds → queued again when the PR is gone/merged."""
+    """Open-PR holds (feature/search/polish) → queued again when the PR is gone/merged."""
     from app import office
+    from app.work import actions
     with _LOCK:
         state = _state()
         flow = office.read_flow()
@@ -387,7 +387,8 @@ def _release_held() -> None:
         for x in state["items"]:
             if x.get("status") != STATUS_HELD:
                 continue
-            if x.get("task") == "feature" and not open_pr:
+            task = str(x.get("task") or "")
+            if task in actions.PR_HOLD_TASKS and not open_pr:
                 x["status"] = STATUS_QUEUED
                 x["error"] = ""
                 changed = True
@@ -445,8 +446,17 @@ def _start_item(item: dict[str, Any]) -> bool:
         if source == "task":
             from app.work import actions
             task = item.get("task") or ""
+            hold_why = actions.pr_hold_reason(task, sid)
+            if hold_why:
+                _mark(item["id"], status=STATUS_HELD, error=hold_why[:200])
+                return False
             who = None
-            if task in actions.ACTIONS and task not in ("write", "search", "issue", "review", "deploy"):
+            if task == "ba_ja":
+                from app.work import workers as workers_mod
+                paths = item.get("paths") if isinstance(item.get("paths"), list) else None
+                who = jobs.start_task("ba_ja", item.get("title") or "BA 일본어화 시작",
+                                     workers_mod.translate_ba_ja, paths)
+            elif task in actions.ACTIONS and task not in ("write", "search", "issue", "review", "deploy"):
                 # panel action ids (research, polish, analyze, optimize, …)
                 who = actions.ACTIONS[task]["run"]()
             else:
@@ -483,6 +493,14 @@ def next_item() -> bool:
     """Start at most one queued item for the current site. Returns True if started."""
     if prefs()["queue_paused"] or _state().get("paused"):
         return False
+    from app import tools as tools_mod
+    blocked, why = tools_mod.claude_blocked()
+    if blocked:
+        try:
+            tools_mod.halt_claude_limit(why)
+        except Exception as exc:  # noqa: BLE001
+            print(f"workqueue claude halt: {exc}")
+        return False
     _release_held()
     with _LOCK:
         state = _state()
@@ -496,8 +514,16 @@ def next_item() -> bool:
 def start_now(item_id: str, site_id: str | None = None) -> dict[str, Any]:
     """Start one queued item immediately (한눈에 팝업 「지금 시작»)."""
     from app.office import jobs
+    from app import tools as tools_mod
 
     sid = site_id or sites.current_id()
+    blocked, why = tools_mod.claude_blocked()
+    if blocked:
+        try:
+            tools_mod.halt_claude_limit(why)
+        except Exception as exc:  # noqa: BLE001
+            print(f"workqueue start_now claude halt: {exc}")
+        return {"ok": False, "msg": why or "Claude 한도예요 · 풀린 뒤 다시 시작해 주세요"}
     if prefs(sid)["queue_paused"] or _state(sid).get("paused"):
         return {"ok": False, "msg": "실행 큐가 멈춰 있어요 · 다시 켠 뒤 시도해 주세요"}
     with _LOCK:
@@ -537,7 +563,16 @@ def start_now(item_id: str, site_id: str | None = None) -> dict[str, Any]:
 
 def drain_now(site_id: str | None = None) -> dict[str, Any]:
     """Start the next queued item for a site right away (no kick delay)."""
+    from app import tools as tools_mod
+
     sid = site_id or sites.current_id()
+    blocked, why = tools_mod.claude_blocked()
+    if blocked:
+        try:
+            tools_mod.halt_claude_limit(why)
+        except Exception as exc:  # noqa: BLE001
+            print(f"workqueue drain_now claude halt: {exc}")
+        return {"ok": False, "msg": why or "Claude 한도예요 · 풀린 뒤 다시 시작해 주세요"}
     if prefs(sid)["queue_paused"] or _state(sid).get("paused"):
         return {"ok": False, "msg": "실행 큐가 멈춰 있어요"}
     with sites.use(sid):
