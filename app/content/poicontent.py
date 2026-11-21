@@ -91,6 +91,30 @@ def __getattr__(name: str):   # poicontent.CATEGORIES follows the current site: 
     raise AttributeError(name)
 
 
+# Guide-shaped titles must not go through Places "one spot" write (比較 / アクセス / 完全ガイド …).
+_GUIDE_TOPIC = re.compile(
+    r"(ガイド|가이드|比較|비교|アクセス|접근|가는\s*법|준비|고르는|렌탈|rental|"
+    r"how\s*to|complete\s*guide|comparison|\bguides?\b|\baccess\b|"
+    r"완전\s*가이드|여행\s*가이드|예약\s*팁)",
+    re.I,
+)
+
+
+def is_guide_topic(topic: str) -> bool:
+    return bool(_GUIDE_TOPIC.search(str(topic or "")))
+
+
+def resolve_category(category: str | None, topic: str) -> str:
+    """Map write category: guide-shaped topics → 가이드; else noun_ko (가게/골프장/…)."""
+    noun, guide = kit().noun_ko, "가이드"
+    if category in ("가이드", "guide") or is_guide_topic(topic):
+        return guide
+    if category == noun:
+        return noun
+    # empty / unknown: place only when it does not look like a guide
+    return noun
+
+
 def is_site() -> bool:
     return sites.current().content == "poi"
 
@@ -308,6 +332,7 @@ def plan(category: str, topic: str) -> dict[str, Any]:
     from llm_claude import MODEL_LIGHT, claude_json
 
     k = kit()
+    category = resolve_category(category, topic)
     if category != "가이드":
         data = claude_json(
             f"For {k.domain}. Identify this real {k.noun_en} in Japan: {topic}\n"
@@ -315,7 +340,10 @@ def plan(category: str, topic: str) -> dict[str, Any]:
             f'"area": "city / neighborhood", "features": "comma tags: {k.features_hint}"}} — use null for name if unsure it exists.',
             timeout_sec=90, model=MODEL_LIGHT) or {}
         if not data.get("name"):
-            raise RuntimeError(f"「{topic[:30]}」 {k.noun_ko}을(를) 특정하지 못했어요. 이름과 지역을 같이 적어 주세요")
+            raise RuntimeError(
+                f"「{topic[:30]}」 {k.noun_ko}을(를) 특정하지 못했어요. "
+                f"장소 이름·지역을 같이 적거나, 비교·가는 법·준비는 category를 가이드로 해요"
+            )
         return {"name": str(data["name"]), "area": str(data.get("area") or ""), "features": str(data.get("features") or "")}
     data = claude_json(
         f"For {k.domain}. Make a guide row for this topic: {topic}\n"
@@ -336,7 +364,7 @@ def guide_id(raw: str) -> str:
 
 
 def write(work, category: str, topic: str, row: dict[str, Any] | None = None) -> dict[str, Any]:
-    category = "가이드" if category in ("가이드", "guide") else kit().noun_ko
+    category = resolve_category(category, topic)
     row = row or plan(category, topic)
     return write_guide(work, row) if category == "가이드" else write_shop(work, row)
 

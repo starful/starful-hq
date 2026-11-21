@@ -3,7 +3,8 @@
 Local back office for managing the Starful sites. A virtual office where AI staff handle writing, SEO, images, PRs and deploys in one flow.
 
 - URL: http://127.0.0.1:8091
-- Run: `./start.sh` (or `./start.sh 7777`)
+- Always on (login): LaunchAgent `com.starful.hq` — `./hq-ctl.sh on|off|status|log`
+- Manual: `./start.sh` (or `./start.sh 7777`) · Finder: `restart-8091.command`
 - Sites: the `hq:` blocks in `/opt/work/sites.yaml`
 
 ## Layout

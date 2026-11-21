@@ -5,13 +5,16 @@ from app.office import jobs
 from app import office
 from app import sites
 def test_registry_and_offices():
-    assert [s.id for s in sites.office_sites("datalab")] == ["okpy", "jpcampus", "krcampus", "companydb"]
+    assert [s.id for s in sites.office_sites("datalab")] == ["okpy", "jpcampus", "krcampus", "companydb", "krcare"]
     assert [s.id for s in sites.office_sites("playground")] == ["okramen", "okcaddie", "okonsen", "jpfun"]
+    assert [s.id for s in sites.office_sites("basement")] == ["sitekpi"]
     assert sites.OFFICES["datalab"].name == "Data Lab" and sites.OFFICES["playground"].name == "Playground"
+    assert sites.OFFICES["basement"].name == "Task Force"
     assert [s.id for s in sites.enabled()] == [
-        "okpy", "jpcampus", "krcampus", "companydb", "okramen", "okcaddie", "okonsen", "jpfun", "krcare",
+        "okpy", "jpcampus", "krcampus", "companydb", "krcare", "okramen", "okcaddie", "okonsen", "jpfun", "sitekpi",
     ]
     assert sites.SITES["okpy"].automerge and not sites.SITES["jpcampus"].automerge
+    assert sites.SITES["sitekpi"].office == "basement" and sites.SITES["krcare"].office == "datalab"
 
 
 def test_paths_follow_the_current_site():
@@ -53,7 +56,7 @@ def test_concurrency_cap_lets_hand_offs_through(monkeypatch):
     gate, handed = threading.Event(), {}
 
     def first(w):
-        handed["ok"] = jobs.start("doyun", "푸시", lambda w2: "pushed", _task="push")   # hand-off from inside a job
+        handed["ok"] = jobs.start("hajun", "푸시", lambda w2: "pushed", _task="push")   # hand-off from inside a job
         gate.wait(3)
         return "ok"
     assert jobs.start("daeun", "리뷰", first, _task="review")
@@ -317,24 +320,35 @@ def test_companydb_queue_counts_as_ready_topics(tmp_path, monkeypatch):
                                                            "names": {"PG": "Procter & Gamble"}}))
     with sites.use("companydb"):
         picks = workers.read_research()["picks"]
-        assert [p["row"]["ticker"] for p in picks] == ["4739", "036030", "PG"] and picks[2]["topic"] == "PG Procter & Gamble"
+        # KR · US · JP round-robin (not JP-first)
+        assert [p["row"]["ticker"] for p in picks] == ["036030", "PG", "4739"] and picks[1]["topic"] == "PG Procter & Gamble"
         assert workers.read_research(raw=True) == {}
-        assert actions._new_picks() == ["q-JP-4739", "q-KR-036030", "q-US-PG"]
-        workers._set_pick("q-US-PG", status="writing")        # queue picks are never saved into research.json
-        assert not workers.read_research(raw=True).get("picks")
+        assert actions._new_picks() == ["q-KR-036030", "q-US-PG", "q-JP-4739"]
+        workers._set_pick("q-US-PG", status="writing", upsert=picks[1])
+        saved = workers.read_research(raw=True).get("picks") or []
+        assert saved and saved[0]["id"] == "q-US-PG" and saved[0]["status"] == "writing"
 
 
-def test_companydb_has_no_polish():
-    from app.work import marketing
+def test_companydb_has_no_polish_or_research():
+    from app.work import marketing, actions
     from app.office import meeting
     jobs.JOBS.clear()
     with sites.use("companydb"):
         assert not sites.current().can_polish
+        assert not sites.current().can_research
         assert jobs.start_task_split("polish", ["000270.html"], lambda n: "x", lambda w, r, a: "x") == []
+        assert jobs.start_task("research", "x", lambda w: "x") is None
         assert marketing.polish_candidates({}, {})["rows"] == []
-        ideas = meeting._normalize({"ideas": [{"who": "subin", "title": "t", "action": {"type": "polish"}}]}, ["subin"])
-        assert ideas[0]["action"]["type"] == "none"
-    assert sites.SITES["okpy"].can_polish and sites.SITES["jpcampus"].can_polish
+        assert actions.state("research")["enabled"] is False
+        ideas = meeting._normalize({"ideas": [
+            {"who": "subin", "title": "t", "action": {"type": "polish"}},
+            {"who": "jiho", "title": "r", "action": {"type": "research"}},
+        ]}, ["subin", "jiho"])
+        by_who = {i["who"]: i for i in ideas}
+        assert by_who["subin"]["action"]["type"] == "none"
+        assert by_who["jiho"]["action"]["type"] == "none"
+    assert sites.SITES["okpy"].can_polish and sites.SITES["okpy"].can_research
+    assert sites.SITES["jpcampus"].can_polish and sites.SITES["jpcampus"].can_research
 
 
 def test_each_site_names_its_content():

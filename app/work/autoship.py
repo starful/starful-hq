@@ -1,5 +1,4 @@
-"""자동 진행: changes → PR → review → merge → deploy, without anyone pressing a button. The last step is a person
-looking at the live site (사이트 확인).
+"""자동 진행: changes → PR → review → merge → deploy, without anyone pressing a button.
 
 After every job of a site ends (jobs.run → kick) and every few minutes (start_loop), next_step() looks at where the
 site stands and hands the next piece of work to the right team — one step at a time, only when nobody is still
@@ -9,9 +8,9 @@ working on that site (so a batch of writers ends up in one PR):
   open PR, reviewed OK, not merged         → 개발팀 머지
   open PR, review asks for fixes           → 마케팀 / 개발팀 고치기 (up to workers.MAX_FIX_ROUNDS, then it stops for a person)
   merged, not deployed                     → 개발팀 배포
-  deployed                                 → waits for 사이트 확인 (a person presses "확인했어요")
+  deployed                                 → 현황 「올렸어요 · 시각」(확인 버튼 없음)
 
-On/off is per office (floor): data/autoship.json → offices.<id>.on. 사이트 확인(checked_at) stays per site.
+On/off is per office (floor): data/autoship.json → offices.<id>.on. checked_at는 사이트별(표시용·하위 호환).
 """
 
 from __future__ import annotations
@@ -60,13 +59,13 @@ def _migrate(raw: dict[str, Any]) -> dict[str, Any]:
     if isinstance(raw.get("offices"), dict):
         for oid, blk in raw["offices"].items():
             if isinstance(blk, dict):
-                offices[str(oid)] = {"on": bool(blk.get("on", True))}
+                offices[str(oid)] = {"on": bool(blk.get("on", False))}
 
     for key, blk in raw.items():
         if key in ("offices", "sites") or not isinstance(blk, dict):
             continue
         if key in sites.OFFICES:
-            offices.setdefault(key, {})["on"] = bool(blk.get("on", True))
+            offices.setdefault(key, {})["on"] = bool(blk.get("on", False))
             continue
         if key in sites.SITES:
             if "checked_at" in blk and blk["checked_at"]:
@@ -112,7 +111,7 @@ def _write(data: dict[str, Any]) -> None:
 def enabled(site_id: str | None = None, *, office_id: str | None = None) -> bool:
     oid = office_id or _office_id(site_id)
     blk = (_read().get("offices") or {}).get(oid) or {}
-    return bool(blk.get("on", True))
+    return bool(blk.get("on", False))
 
 
 def set_enabled(on: bool, site_id: str | None = None, *, office_id: str | None = None) -> str:
@@ -131,7 +130,7 @@ def office_states() -> dict[str, bool]:
     out: dict[str, bool] = {}
     for oid in sites.OFFICES:
         blk = (data.get("offices") or {}).get(oid) or {}
-        out[oid] = bool(blk.get("on", True))
+        out[oid] = bool(blk.get("on", False))
     return out
 
 
@@ -179,9 +178,18 @@ def next_step() -> str | None:
     """Hand out the next step for the current site. Returns the person it went to (or None)."""
     from app.office import jobs
     from app import office
+    from app import tools as tools_mod
     from app.work import workers
     site = sites.current()
     if not site.enabled or not enabled(site.id) or _site_busy(site.id):
+        return None
+    blocked, why = tools_mod.claude_blocked()
+    if blocked:
+        # Don't keep starting Claude-heavy PR/review loops while the session is empty.
+        try:
+            tools_mod.halt_claude_limit(why)
+        except Exception as exc:  # noqa: BLE001
+            print(f"autoship claude halt: {exc}")
         return None
     flow = office.read_flow()
     # Always reconcile: GitHub-merged PRs, stale flow.merged=false, leftover feat/ checkout
@@ -193,6 +201,8 @@ def next_step() -> str | None:
     flow = office.read_flow()
     open_pr = bool(flow.get("pr")) and not flow.get("merged")
     if open_pr:
+        if flow.get("merge_conflict"):
+            return None  # conflict: stop retrying until a person fixes / clears
         if not flow.get("reviewed"):
             return jobs.start_task("review", f"PR #{flow['pr'].get('number')} 리뷰 시작 (자동)", workers.review_and_merge)
         if flow.get("verdict_ok"):
@@ -202,6 +212,15 @@ def next_step() -> str | None:
         who, _kind = workers.start_fix_for_review()
         return who
     if flow.get("merged") and not flow.get("deployed"):
+        # New dirty work after merge (pages built on the feat branch) must become
+        # the next PR — otherwise we sit forever on 「머지됨 · 올릴 차례」 while
+        # also showing 「올릴 파일 N개」 and never leave the feat checkout.
+        if _dirty():
+            try:
+                workers.ensure_on_main_if_idle()
+            except Exception as exc:  # noqa: BLE001
+                print(f"autoship ensure_on_main: {exc}")
+            return jobs.start_task("issue", "바뀐 내용 PR 만들기 시작 (자동)", workers.issue_pr, "")
         ready, _why = _deploy_ready()
         if not ready:
             return None  # stage shows stuck; do not keep starting deploy jobs
@@ -250,35 +269,70 @@ def stage(snap_git: dict[str, Any] | None = None) -> dict[str, Any]:
         "deployed_at": str(flow.get("deployed_at") or ""),
         "pr": pr,
     }
-    if open_pr and flow.get("reviewed") and not flow.get("verdict_ok") and int(flow.get("review_round") or 0) >= workers.MAX_FIX_ROUNDS:
+    if open_pr and flow.get("merge_conflict"):
+        detail = str(flow.get("merge_conflict_detail") or "main과 충돌 · 맞춘 뒤 다시 머지해 주세요")[:200]
+        out.update(key="stuck", label=f"PR #{pr.get('number')} 충돌", detail=detail, needs_person=True)
+    elif open_pr and flow.get("reviewed") and not flow.get("verdict_ok") and int(flow.get("review_round") or 0) >= workers.MAX_FIX_ROUNDS:
         out.update(key="stuck", label=f"PR #{pr.get('number')} 리뷰가 계속 막아요", detail=(flow.get("review") or "")[:200], needs_person=True)
     elif open_pr:
         step = "머지" if flow.get("verdict_ok") else ("고치는 중" if flow.get("reviewed") else "리뷰")
         out.update(key="pr", label=f"PR #{pr.get('number')} {step}", detail="개발팀이 검토해서 통과하면 머지·배포까지 해요", needs_person=False)
     elif flow.get("merged") and not flow.get("deployed"):
-        ready, why = _deploy_ready()
-        if not ready:
-            out.update(key="stuck", label="배포 대기 · main이 아님", detail=why, needs_person=True)
+        if _dirty():
+            n = int((snap_git or {}).get("file_count") or 0) or len((snap_git or {}).get("files") or [])
+            label = f"머지 후 남은 변경 {n}개 · 다음 PR" if n else "머지 후 남은 변경 · 다음 PR"
+            out.update(key="changes", label=label, detail="배포보다 먼저 남은 파일을 PR로 올려요", needs_person=False)
         else:
-            out.update(key="deploy", label="머지됨 · 사이트 올리는 차례", detail="개발팀이 Cloud Build로 올려요", needs_person=False)
+            ready, why = _deploy_ready()
+            if not ready:
+                out.update(key="stuck", label="배포 대기 · main이 아님", detail=why, needs_person=True)
+            else:
+                out.update(key="deploy", label="머지됨 · 사이트 올리는 차례", detail="개발팀이 Cloud Build로 올려요", needs_person=False)
     elif git.get("dirty"):
         detail = (f"{off.floor_label} 자동 진행이 꺼져 있어요 · 아래 버튼으로 PR을 만들거나 자동 진행을 켜 주세요" if not out["auto"]
                   else ("진행 중인 일이 끝나면 PR을 만들어요" if busy else "곧 PR을 만들어요"))
         out.update(key="changes", label=f"올릴 변경 {git.get('file_count') or 0}개", detail=detail, needs_person=not out["auto"])
     elif out["deployed_at"] and out["deployed_at"] > out["checked_at"]:
-        out.update(key="check", label=f"올렸어요 · {out['deployed_at'][5:16]}", detail="사이트를 열어 보고 괜찮으면 확인을 눌러 주세요", needs_person=True)
+        out.update(
+            key="check",
+            label=f"올렸어요 · {out['deployed_at'][5:16]}",
+            detail="라이브에 반영됐어요",
+            needs_person=False,
+        )
     else:
-        out.update(key="idle", label="올릴 변경 없음", detail=(f"마지막 확인 {out['checked_at'][5:16]}" if out["checked_at"] else ""), needs_person=False)
+        out.update(
+            key="idle",
+            label="올릴 변경 없음",
+            detail=(f"마지막 배포 {out['deployed_at'][5:16]}" if out["deployed_at"] else ""),
+            needs_person=False,
+        )
     return out
 
 
 def _loop() -> None:
     time.sleep(60)
+    try:   # leftovers from before the restart: note them in each site repo
+        from app.work import handoff
+        handoff.scan_all()
+    except Exception as exc:  # noqa: BLE001
+        print(f"handoff scan: {exc}")
     while True:
+        try:
+            from app.work import seo_guard
+            for line in seo_guard.watch_traffic():
+                print(f"seo_guard alert {line}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"seo_guard watch: {exc}")
         states = office_states()
         for s in sites.enabled():
-            if not states.get(s.office, True):
+            if not states.get(s.office, False):
                 continue
+            try:
+                from app.work import seo_guard
+                if seo_guard.frozen(s.id):
+                    continue   # frozen sites take no automatic work
+            except Exception as exc:  # noqa: BLE001
+                print(f"seo_guard frozen {s.id}: {exc}")
             try:
                 with sites.use(s.id):
                     next_step()

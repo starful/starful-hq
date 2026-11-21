@@ -1,11 +1,13 @@
-"""사장 Taekki: Google login, presence on the office map, and where she stands.
+"""사장 Taekki: login, presence on the office map, and where she stands.
 
-- Login reuses okadmin's Google OAuth client (okadmin/.env: GOOGLE_OAUTH_CLIENT_ID / _SECRET).
-  Nothing in okadmin is changed; the file is only read.
-- Who may log in as the boss: data/boss.json {"emails": [...]} (created with the default below).
-- Without login starful-hq works as before (the owner on this Mac). A boss login adds the CEO
-  character; the boss may walk around, call people to the CEO office and hand out work,
-  but merge and deploy stay with the owner (BOSS_BLOCKED).
+- On this Mac (127.0.0.1 / localhost) 「사장 로그인」 is a one-click local session
+  (email from data/boss.json). No Google redirect needed.
+- Optional Google OAuth: set HQ_BOSS_OAUTH=1 or open /login?oauth=1. Reuses okadmin's
+  GOOGLE_OAUTH_CLIENT_ID / _SECRET. redirect_uri is always
+  http://127.0.0.1:<PORT>/oauth/callback — add that URI in Google Cloud Console
+  (okadmin only registered :8090).
+- Without login starful-hq works as before. Login does not block any feature.
+  While present, idle staff sit at their desks (see office.rest_plan).
 """
 
 from __future__ import annotations
@@ -30,7 +32,6 @@ SECRET_PATH = ROOT / "data" / ".flask_secret"
 DEFAULT_EMAILS = ["starful0418@gmail.com"]
 NAME = "Taekki"
 PRESENT_SEC = 90                       # shown while the boss page polled within this many seconds
-BOSS_BLOCKED = ("review", "deploy", "push", "merge")   # tasks the boss can't start (merge · deploy)
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
@@ -89,6 +90,17 @@ def config() -> dict[str, Any]:
 def is_boss(email: str | None) -> bool:
     emails = {str(e).strip().lower() for e in config().get("emails") or []}
     return bool(email) and email.strip().lower() in emails
+
+
+def default_boss_email() -> str:
+    emails = [str(e).strip().lower() for e in (config().get("emails") or DEFAULT_EMAILS) if str(e).strip()]
+    return emails[0] if emails else ""
+
+
+def callback_uri(port: int | None = None) -> str:
+    """Stable redirect URI — always 127.0.0.1 so it matches Google Console registration."""
+    p = int(port if port is not None else os.environ.get("PORT", "8091"))
+    return f"http://127.0.0.1:{p}/oauth/callback"
 
 
 def auth_url(redirect_uri: str, state: str) -> str:

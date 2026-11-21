@@ -2,13 +2,19 @@
 {% set p_days = proposal_days or [] %}
 {% set p_day = proposal_day or '' %}
 {% set p_day_meetings = day_meetings or [] %}
+{% set p_kinds = day_kinds or [] %}
 {% set p_counts = day_counts or {} %}
 <section class="meet-pane">
     <header class="meet-pane-head">
         <div class="meet-pane-titles">
             <a class="meet-back" href="{{ url_for('site_status') }}" data-track="ui:meet-back">← 현황으로</a>
             <b>회의 결과</b>
-            <span>{% if p_day %}{{ p_day[5:] if p_day|length >= 10 else p_day }} · {{ p_day_meetings | length }}건{% else %}현황에서 회의를 열면 쌓여요{% endif %}</span>
+            {% if p_day %}
+            <span class="meet-day-line">{{ p_day[5:] if p_day|length >= 10 else p_day }} · {{ p_day_meetings | length }}건</span>
+            {% if p_kinds %}<span class="meet-kinds">{{ p_kinds | join(" · ") }}</span>{% endif %}
+            {% else %}
+            <span>현황에서 회의를 열면 쌓여요</span>
+            {% endif %}
         </div>
     </header>
     {% if p_days %}
@@ -24,11 +30,11 @@
         {% else %}<span class="day-arrow off">›</span>{% endif %}
     </nav>
     {% for p in p_day_meetings %}
-    <details class="meet-card"{% if loop.first or p.id == viewing_proposal %} open{% endif %}>
-        <summary>
+    <article class="meet-card{% if p.id == viewing_proposal %} on{% endif %}" id="meet-{{ p.id }}">
+        <header class="mc-head">
             <span class="mc-title">{{ ((p.mode_label or "전사 회의").split(" (")[0] ~ " 결과") if p.meeting else "제안" }}</span>
             <span class="mc-meta">{{ p.at[11:16] if p.at | length > 16 else p.at }}{% if p.focus_label %} · {{ p.focus_label }}{% endif %}{% if p.ask %} · {{ p.ask }}{% endif %}</span>
-        </summary>
+        </header>
         <div class="mc-body">
             {% if p.headline %}<p class="mc-headline">{{ p.headline }}</p>{% endif %}
             {% if p.meeting %}
@@ -54,7 +60,7 @@
             {% endfor %}
             {% endif %}
         </div>
-    </details>
+    </article>
     {% else %}
     <p class="hint">이 날짜의 회의·제안이 없어요.</p>
     {% endfor %}

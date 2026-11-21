@@ -361,6 +361,35 @@ def list_analyses(limit: int = 30) -> list[dict[str, Any]]:
     return out
 
 
+def normalize_analysis_topics(raw: Any) -> list[Any]:
+    """Analysis `topics`: article strings elsewhere; CompanyDB = listed companies only (dicts)."""
+    from app.content import contentkit
+
+    items = list(raw or []) if isinstance(raw, list) else []
+    if not contentkit.is_companydb():
+        return [str(x)[:120] for x in items if str(x).strip()][:6]
+    from app.content import cdbcontent
+
+    have = cdbcontent.covered()
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue  # guide / free-text ideas are not assignable companies
+        m = str(item.get("market") or "").upper()
+        t = str(item.get("ticker") or "").strip().upper()
+        if m not in cdbcontent.CATEGORIES or not t or t in have or t in seen:
+            continue
+        seen.add(t)
+        out.append({
+            "market": m,
+            "ticker": t,
+            "name_en": str(item.get("name_en") or t)[:80],
+            "why": str(item.get("why") or "")[:120],
+        })
+    return out[:6]
+
+
 def analysis_markdown(a: dict[str, Any]) -> str:
     """The report as a Markdown file people can open or share."""
     lines = [f"# {sites.current().label} GA4·GSC 분석 · {a.get('at', '')}", "", f"기간: 최근 28일 ({a.get('period', '')})", ""]
@@ -377,7 +406,14 @@ def analysis_markdown(a: dict[str, Any]) -> str:
     if a.get("polish"):
         lines += ["", "## 다듬을 글", ""] + [f"- {x.get('title', x.get('rel', ''))} — {x.get('why', '')}" for x in a["polish"]]
     if a.get("topics"):
-        lines += ["", "## 새 글 아이디어", ""] + [f"- {x}" for x in a["topics"]]
+        from app.content import contentkit
+        lines += ["", "## 추가할 회사" if contentkit.is_companydb() else "## 새 글 아이디어", ""]
+        for x in a["topics"]:
+            if isinstance(x, dict):
+                bit = f"{x.get('market', '')} {x.get('ticker', '')} {x.get('name_en', '')}".strip()
+                lines.append(f"- {bit}" + (f" — {x['why']}" if x.get("why") else ""))
+            else:
+                lines.append(f"- {x}")
     if a.get("errors"):
         lines += ["", "## 못 받은 숫자", ""] + [f"- {x}" for x in a["errors"]]
     return "\n".join(lines) + "\n"
@@ -589,6 +625,17 @@ def traffic_card(*, refresh: bool = False, soft: bool = False, days: int = 28) -
             "position": float(r.get("position") or 0),
         })
 
+    # GSC per-day clicks / impressions for the chart above the query table
+    gsc_days = []
+    for r in (gsc_d.get("rows") or []):
+        if not isinstance(r, dict):
+            continue
+        day = str(r.get("date") or (r.get("keys") or [""])[0] or "")[:10]
+        if day:
+            gsc_days.append({"date": day, "clicks": int(r.get("clicks") or 0),
+                             "impressions": int(r.get("impressions") or 0)})
+    gsc_days.sort(key=lambda x: x["date"])
+
     gt = ga4.get("totals") or {}
     st = gsc_d.get("totals") or {}
     users = int(gt.get("users") or 0)
@@ -627,6 +674,7 @@ def traffic_card(*, refresh: bool = False, soft: bool = False, days: int = 28) -
             "d_clicks": _fmt_delta(gsc_d, "clicks"),
             "d_impressions": _fmt_delta(gsc_d, "impressions"),
             "queries": queries,
+            "days": gsc_days,
             "start": gsc_q.get("start") or gsc_d.get("start") or "",
             "end": gsc_q.get("end") or gsc_d.get("end") or "",
         },
@@ -699,6 +747,20 @@ def analyze(work) -> str:
              if slug_of(p.get("page")) in index]
 
     work.say("숫자를 읽고 할 일을 정리하는 중")
+    from app.content import contentkit
+    companydb = contentkit.is_companydb()
+    topics_schema = (
+        '"topics": [{"market": "JP|KR|US", "ticker": "상장 티커", "name_en": "공식 영문명", '
+        '"why": "한국어 한 줄: 왜 지금 이 회사를 추가할지"}]'
+        if companydb else
+        '"topics": ["새 글 주제 아이디어 (일본어 키워드 포함)"]'
+    )
+    topics_rule = (
+        "topics는 CompanyDB에 아직 없는 상장사만(가이드·읽는 법·비교 글 금지). "
+        "이미 있는 회사·비상장·티커 불명은 넣지 마라.\n"
+        if companydb else
+        ""
+    )
     prompt = (
         f"너는 {sites.current().label}({sites.current().domain or sites.current().id}) — {sites.current().blurb} — 의 마케터다. 아래 GA4·GSC 28일 데이터를 읽고 한국어로 답하라.\n"
         "JSON만 출력한다. 형식:\n"
@@ -706,8 +768,9 @@ def analyze(work) -> str:
         '"actions": [{"team": "마케팀|기획팀|디자인팀", "text": "구체적인 할 일"}], '
         '"search": [{"url": "후보 URL 그대로", "why": "짧은 이유"}], '
         '"polish": [{"page": "GA4 page 또는 후보 URL 그대로", "why": "짧은 이유"}], '
-        '"topics": ["새 글 주제 아이디어 (일본어 키워드 포함)"]}\n'
+        f"{topics_schema}" + "}\n"
         "search는 검색 후보에서 제목·설명을 먼저 고칠 글 최대 10개, polish는 본문을 다듬을 글 최대 10개.\n"
+        f"{topics_rule}"
         "URL은 주어진 목록의 값을 그대로 써라. 지어내지 마라.\n\n"
         f"핵심 숫자: {json.dumps(numbers, ensure_ascii=False)}\n"
         f"기타: {json.dumps(_compact_overview(ov), ensure_ascii=False, default=str)[:6000]}\n"
@@ -739,7 +802,7 @@ def analyze(work) -> str:
                     for a in (data.get("actions") or []) if isinstance(a, dict)][:6],
         "search": search[:10],
         "polish": polish[:10],
-        "topics": [str(x)[:120] for x in (data.get("topics") or [])][:6],
+        "topics": normalize_analysis_topics(data.get("topics") or []),
         "targets": counts,
         "errors": errors,
     }

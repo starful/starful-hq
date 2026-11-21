@@ -1,4 +1,4 @@
-"""자동 진행: the next step after each job (changes → PR → review → merge → deploy → 확인)."""
+"""자동 진행: the next step after each job (changes → PR → review → merge → deploy)."""
 from app.work import autoship
 from app.office import jobs
 from app import office
@@ -41,6 +41,11 @@ def test_steps_in_order(monkeypatch, tmp_path):
         s = _setup(monkeypatch, tmp_path, {"pr": {"number": 7}, "merged": True, "deployed": False})
         autoship.next_step()
         assert s[-1][0] == "deploy"                                  # merged → deploy
+        # Merged but still dirty (pages built on feat/) → next PR, not stuck on deploy
+        monkeypatch.setattr(workers, "ensure_on_main_if_idle", lambda: True)
+        s = _setup(monkeypatch, tmp_path, {"pr": {"number": 7}, "merged": True, "deployed": False}, dirty=True)
+        autoship.next_step()
+        assert s[-1][0] == "issue"
 
 
 def test_waits_and_stops(monkeypatch, tmp_path):
@@ -57,12 +62,26 @@ def test_waits_and_stops(monkeypatch, tmp_path):
         assert autoship.enabled()
 
 
-def test_stage_asks_for_site_check(monkeypatch, tmp_path):
+def test_merge_conflict_stops_autoship_and_stage_needs_person(monkeypatch, tmp_path):
+    with sites.use("okpy"):
+        flow = {
+            "pr": {"number": 114}, "reviewed": True, "verdict_ok": True,
+            "merge_conflict": True, "merge_conflict_detail": "not mergeable: cannot be cleanly created",
+        }
+        s = _setup(monkeypatch, tmp_path, flow)
+        assert autoship.next_step() is None and not s
+        st = autoship.stage({})
+        assert st["key"] == "stuck" and st["needs_person"]
+        assert "114" in st["label"] and "충돌" in st["label"]
+
+
+def test_stage_shows_deployed_without_confirm(monkeypatch, tmp_path):
     with sites.use("okpy"):
         _setup(monkeypatch, tmp_path, {"deployed": True, "deployed_at": "2026-10-24 08:30"})
         st = autoship.stage({})
-        assert st["key"] == "check" and st["needs_person"] and st["url"] == "https://okpy.net"
-        assert st["office"] == "datalab" and st["floor_label"] == "1층"
+        assert st["key"] == "check" and not st["needs_person"] and st["url"] == "https://okpy.net"
+        assert "올렸어요" in st["label"] and st["office"] == "datalab" and st["floor_label"] == "1층"
+        # mark_checked still clears the banner (하위 호환 · UI 버튼은 없음)
         autoship.mark_checked()
         assert autoship.stage({})["key"] == "idle"
 
