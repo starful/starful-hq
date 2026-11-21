@@ -258,6 +258,7 @@ def start_team(
 
 WIP_TASKS = ("issue", "push", "deploy", "optimize", "refactor", "refactor_front", "refactor_back")   # wait for the owner's uncommitted work
 CONTENT_TASKS = ("research", "write", "queue", "images")   # need the site's own post generator (okpy only for now)
+FROZEN_TASKS = ("write", "polish", "search", "fix", "images", "ba_ja")   # change the site's pages: refused while the site is frozen (seo_guard)
 
 
 def reset_request() -> None:
@@ -293,6 +294,16 @@ def start_task(task: str, start_line: str, target: Callable[..., str], *args: An
     Returns the person id, or None when the whole team is busy or someone already does this kind of
     work (e.g. a second 소스정리 while one is running).
     """
+    if task in FROZEN_TASKS:
+        try:
+            from app.work import seo_guard
+            rec = seo_guard.frozen()
+        except Exception as exc:  # noqa: BLE001
+            print(f"seo_guard frozen check: {exc}")
+            rec = None
+        if rec:
+            _refused(f"{sites.current().label}는 {rec.get('until')}까지 콘텐츠 동결이에요 ({rec.get('reason')}) · 페이지를 고치는 일은 안 맡아요")
+            return None   # SEO recovery: no page changes on a frozen site (code fixes still allowed)
     if task in CONTENT_TASKS and not sites.current().can_write:
         _refused(f"{sites.current().label}는 아직 이 일이 연결되지 않았어요")
         return None   # this site's posts/images are not connected yet: nobody is handed work that can only fail
@@ -341,6 +352,16 @@ def start_task(task: str, start_line: str, target: Callable[..., str], *args: An
 
 def start_task_split(task: str, items: list, start_line: Callable[[int], str], target: Callable[..., str], *extra: Any):
     """Split items across the free members of the task's team (see start_team)."""
+    if task in FROZEN_TASKS:
+        try:
+            from app.work import seo_guard
+            rec = seo_guard.frozen()
+        except Exception as exc:  # noqa: BLE001
+            print(f"seo_guard frozen check: {exc}")
+            rec = None
+        if rec:
+            _refused(f"{sites.current().label}는 {rec.get('until')}까지 콘텐츠 동결이에요 ({rec.get('reason')}) · 페이지를 고치는 일은 안 맡아요")
+            return []
     if task in CONTENT_TASKS and not sites.current().can_write:
         _refused(f"{sites.current().label}는 아직 이 일이 연결되지 않았어요")
         return []
