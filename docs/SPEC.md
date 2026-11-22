@@ -108,6 +108,7 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
 | `seo_watch.json` | 노출 감시 마지막 결과 `{checked, sites: {id: {now, before}}, alerts}` (하루 1번) |
 | `seo_alerts.json` | 노출 급락 기록 `{site: {text, at, first_at, acked}}` (지금은 화면에 안 띄움) |
 | `seo_guard.json` | (선택) SEO 안전 한도 덮어쓰기 — 없으면 `seo_guard.DEFAULTS` |
+| `office_moves.json` | 임시 층 이동·소등 `{closed: [office], moves: {person: {office, seat}}, note}`. 2026-11-22 2층 소등 · 2층 사원 8명 1층 근무(검색 복구 기간). 비우면 원래대로 |
 
 ## 5. 라우트
 
@@ -131,6 +132,7 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
 - `STAFF = {"datalab": _STAFF_1F, "playground": _STAFF_2F, "basement": _STAFF_B1}`
 - 고정 사원 **16명** = 리더 4(1층) + 사원 12. B1 TF 임시 **4** (`tf_rio`·`tf_mina`·`tf_noa`·`tf_jun`, `temp: true`, lead 없음). 합계 20. 리더 회의·사장실 = `company_leaders()`. 알바 3 = 휴가 대행만(맥스·명단 밖).
 - 채용·해고 `app/office/staffing.py` · `data/staffing.json`: 맥스 `MAX_STAFF=25`. 사장님이 **층·팀**을 고른 뒤 「공고 올리기」→ 후보 확인/거절. 정원 여유(`open`)만 있으면 해고 없이도 채용. 해고 빈자리가 같은 팀이면 그 자리 우선. 리더 해고는 **같은 팀 후임** 필수(`leads` 맵). `POST /staff/hire|fire|approve|reject`. 반영 후 `rebuild_staff_caches()`.
+- 임시 층 이동·소등 (`staffing.office_moves()` · `data/office_moves.json`): `moves`의 사원은 `_base_people()`에서 `office`·`seat`이 바뀜(`moved: True`). `closed` 층은 지도가 어두워지고 「🌙 소등 중 · 사원은 N층에서 근무」(`office._lights_off`, `.lights-off` · `.lights-off-veil`). 사원 없는 층은 일을 맡을 사람이 없어 시작 안 됨 · `_next_up`은 빈 팀을 건너뜀. 2026-11-22 1층 팀별 4명(추가 자리: 기획·마케 책상 3번째, 디자인 책상 아래 2, 개발 블록 3번째·아래 줄 3)
 - 리더는 1·2·B1을 오간다: 다른 층 잡/회의면 그 층 지도에 방문(`visitor`), 집 층에서는 `away`.
 - 스케줄 `app/office/schedule.py` · `data/office_schedule.json`: 근무 시(기본 월–일 **08–22**) · 점심 · 휴가 · 알바 3명 대행. **주말 휴무 없음**. 팀당 동시 휴가 1명. `enforce_hours`면 퇴근 후 새 잡 거부. 퇴근·휴가는 지도에서 숨김. 퇴근이면 지도 **위** `hours_notice` + 팀 책상판에 날짜별 재미 문구(`team_off_quip`). 휴가면 `vacation_notice`. (CS팀은 이후)
 - `TASK_TEAM`: plan = research · write · **ba_ja** · issue · propose / mkt = search · polish · analyze · partner_collect · fix / design = images / dev = fix_code · refactor* · optimize · review · push · deploy. 새 좌석 업무 액션 `_add(..., team in TEAMS, task=…)` 는 반드시 `TASK_TEAM`에도 같은 팀으로 등록 (`actions._add`가 import 시 검사 · `meeting*` 제외). 빠지면 `ordered_members`가 빈 리스트 → 예전엔 「모두 일하는 중」으로 오인. 지금은 `start_task`가 `TASK_TEAM` 누락을 명시. 회귀: `tests/test_office.py` (`test_every_seat_work_action_task_is_in_task_team`)

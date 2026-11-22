@@ -2693,3 +2693,8 @@ button.sending { opacity: .6; cursor: progress; }
 @media (max-width: 999px) {
     .site-page .work-map .office-map { width: min(100%, calc(55dvh * 6 / 5)); margin: 0 auto; }
 }
+
+/* 소등된 층 (data/office_moves.json closed) — 2026-11-22 */
+.office-map.lights-off .floor-img, .office-map.lights-off .floor-front { filter: brightness(.35) saturate(.4); }
+.office-map .lights-off-veil { position: absolute; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: rgba(10, 14, 30, .35); pointer-events: none; }
+.office-map .lights-off-veil span { background: rgba(20, 24, 40, .85); color: #f3f0e6; font-size: 14px; font-weight: 600; padding: 8px 16px; border-radius: 999px; }
