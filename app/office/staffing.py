@@ -77,9 +77,38 @@ def save(data: dict[str, Any]) -> None:
     tmp.replace(PATH)
 
 
+MOVES_PATH = HQ_ROOT / "data" / "office_moves.json"   # temporary floor moves · closed floors (lights off)
+
+
+def office_moves() -> dict[str, Any]:
+    """{"closed": [office ids], "moves": {person id: {"office", "seat"}}}. Missing/broken file → nothing moved."""
+    try:
+        data = json.loads(MOVES_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"closed": [], "moves": {}}
+    if not isinstance(data, dict):
+        return {"closed": [], "moves": {}}
+    closed = [str(x) for x in (data.get("closed") or []) if x]
+    moves = {str(k): v for k, v in (data.get("moves") or {}).items() if isinstance(v, dict) and v.get("office")}
+    return {"closed": closed, "moves": moves, "note": str(data.get("note") or "")}
+
+
+def closed_offices() -> list[str]:
+    return office_moves()["closed"]
+
+
 def _base_people() -> list[dict[str, Any]]:
     from app.office import STAFF
-    return [deepcopy(p) for people in STAFF.values() for p in people]
+    people = [deepcopy(p) for people in STAFF.values() for p in people]
+    moves = office_moves()["moves"]
+    for p in people:
+        mv = moves.get(p["id"])
+        if mv:
+            p["office"] = str(mv["office"])
+            if isinstance(mv.get("seat"), dict):
+                p["seat"] = dict(mv["seat"])
+            p["moved"] = True
+    return people
 
 
 def _apply_leads(people: list[dict[str, Any]], leads: dict[str, str]) -> None:

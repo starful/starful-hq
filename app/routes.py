@@ -345,6 +345,8 @@ def _next_up() -> dict[str, str]:
     out = {}
     for task, team in _UI_TEAM.items():
         members = office.ordered_members(task) or list(office.team_members(team))
+        if not members:   # a closed floor (lights off) has nobody on the team
+            continue
         out[task] = next((m for m in members if not jobs.running(m)), members[0])
     return out
 

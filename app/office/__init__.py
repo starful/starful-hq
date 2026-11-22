@@ -916,7 +916,22 @@ def build_office(
         "borrow": False,
         "vacation_notice": vac_notice,
         "hours_notice": hours_note,
+        "lights_off": _lights_off(sites.office_of().id),
     }
+
+
+def _lights_off(office_id: str) -> str:
+    """A closed floor (data/office_moves.json): the map is dark and says where its people went."""
+    try:
+        from app.office import staffing as _staffing
+        mv = _staffing.office_moves()
+    except Exception:  # noqa: BLE001
+        return ""
+    if office_id not in mv["closed"]:
+        return ""
+    gone = sorted({str(v.get("office")) for v in mv["moves"].values()} - {office_id})
+    where = " · ".join(f"{sites.OFFICES[o].floor_label}" for o in gone if o in sites.OFFICES)
+    return "소등 중" + (f" · 사원은 {where}에서 근무" if where else "")
 
 
 def _build_borrowed(snap: dict[str, Any], job: dict[str, Any] | None, flow: dict[str, Any] | None) -> dict[str, Any]:

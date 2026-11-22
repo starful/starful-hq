@@ -10,9 +10,10 @@
 {% else %}
 <p class="office-vac-note" id="office-vac-note" role="status" hidden></p>
 {% endif %}
-<div class="office-map{% if office.floor %} has-floor{% endif %} floor-{{ office.floor_no or 1 }}{% if office.hours_notice %} off-hours{% endif %}" id="office-map" data-focus="{{ focus_role or '' }}" data-focus-label="{{ focus_label or '' }}">
+<div class="office-map{% if office.floor %} has-floor{% endif %} floor-{{ office.floor_no or 1 }}{% if office.hours_notice %} off-hours{% endif %}{% if office.lights_off %} lights-off{% endif %}" id="office-map" data-focus="{{ focus_role or '' }}" data-focus-label="{{ focus_label or '' }}">
     {% if office.floor %}<img class="floor-img" src="{{ url_for('static', filename=office.floor) }}" alt="" aria-hidden="true">{% endif %}
     {% if office.floor_front %}<img class="floor-front" src="{{ url_for('static', filename=office.floor_front) }}" alt="" aria-hidden="true">{% endif %}
+    {% if office.lights_off %}<div class="lights-off-veil" role="status"><span>🌙 {{ office.lights_off }}</span></div>{% endif %}
     <div class="map-wall" aria-hidden="true"><span class="window"></span><span class="window"></span><span class="window"></span><span class="window"></span></div>
     <div class="lane lane-content" aria-hidden="true"><span>콘텐츠</span></div>
     <div class="lane lane-git{% if here == 'ship' %} here{% endif %}" aria-hidden="true"><span>git · 반영</span></div>
