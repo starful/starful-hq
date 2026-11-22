@@ -255,6 +255,7 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
 - 로그인해도 기능 제한 없음 (PR·머지·배포 포함). 사장 출석이면 쉬는 사원은 전원 자기 자리. **퇴근 시각**에 사장 로그인이면 헤더에 「근무 시간이 끝났어요 · 사장님도 퇴근해 주세요」
 - 도구 점검: `tools/check` · `tools/claude-login` · `tools/restart`
 - Claude 세션 한도(5시간/주간 ≥100%·level=over): `tools.halt_claude_limit` → 전 층 autoship 끔 + 전 사이트 실행 큐 pause · `data/claude_halt.json`. 잡 실패·autoship/workqueue 루프에서도 동일. 한도 중엔 층 메뉴 자동 진행 켜기 거부. 한도 풀린 뒤 사람이 다시 켬
+- 다시 켜기: 현황 `ss-head`에 「⏸ 실행 큐 멈춤」칩 + 「실행 큐 다시 켜기」버튼(`POST /site/<site>/queue/pause` on=0 → `clear_claude_halt` + `set_paused(False)`). Claude 한도 중이면 버튼 숨김, 소등 층(`office.lights_off`)이면 칩·버튼 모두 숨김 (2026-11-22)
 
 ## 13. 개발 규칙
 
