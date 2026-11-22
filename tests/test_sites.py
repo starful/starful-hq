@@ -5,13 +5,13 @@ from app.office import jobs
 from app import office
 from app import sites
 def test_registry_and_offices():
-    assert [s.id for s in sites.office_sites("datalab")] == ["okpy", "jpcampus", "krcampus", "companydb", "krcare"]
-    assert [s.id for s in sites.office_sites("playground")] == ["okramen", "okcaddie", "okonsen", "jpfun"]
+    assert [s.id for s in sites.office_sites("datalab")] == ["okpy", "jpcampus", "krcampus", "companydb", "krcare", "jpfun"]
+    assert [s.id for s in sites.office_sites("playground")] == ["okramen", "okcaddie", "okonsen"]
     assert [s.id for s in sites.office_sites("basement")] == ["sitekpi"]
     assert sites.OFFICES["datalab"].name == "Data Lab" and sites.OFFICES["playground"].name == "Playground"
     assert sites.OFFICES["basement"].name == "Task Force"
     assert [s.id for s in sites.enabled()] == [
-        "okpy", "jpcampus", "krcampus", "companydb", "krcare", "okramen", "okcaddie", "okonsen", "jpfun", "sitekpi",
+        "okpy", "jpcampus", "krcampus", "companydb", "krcare", "jpfun", "okramen", "okcaddie", "okonsen", "sitekpi",
     ]
     assert sites.SITES["okpy"].automerge and not sites.SITES["jpcampus"].automerge
     assert sites.SITES["sitekpi"].office == "basement" and sites.SITES["krcare"].office == "datalab"

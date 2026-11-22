@@ -59,7 +59,7 @@ starful-hq/
 | okramen | playground | 10 | poi |
 | okcaddie | playground | 20 | poi |
 | okonsen | playground | 30 | poi |
-| jpfun | playground | 40 | poi |
+| jpfun | datalab | 60 | poi |
 | krcare | datalab | 50 | "" |
 | sitekpi | basement | 10 | "" |
 

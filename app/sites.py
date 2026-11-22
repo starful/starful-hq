@@ -12,8 +12,8 @@ Registry (one place to add / soft-off / remove a site):
   Content kits (poicontent / jpcontent / cdbcontent) still hold per-site generator details.
 
 Offices group sites and have their own staff and floor plan:
-  Data Lab   — okpy · jpcampus · krcampus · companydb
-  Playground — okramen · okcaddie · okonsen · jpfun
+  Data Lab   — okpy · jpcampus · krcampus · companydb · krcare · jpfun
+  Playground — okramen · okcaddie · okonsen
 A site is switched on (enabled) once its work is connected; until then it is listed as 준비 중.
 """
 
