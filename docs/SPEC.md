@@ -200,7 +200,7 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
   - 동결 사이트의 콘텐츠 변경
 - 본문 비교는 front matter를 뗀 뒤 공백을 하나로 접어 비교(빈 줄 추가만으로는 본문 변경 아님)
 - 동결: `frozen(site)` · `freeze(site, reason, days)` (`freeze_days` 30, 기존 기한보다 짧게 안 함). 동결 사이트는 autoship 스킵 + 콘텐츠 PR 머지 막음 + 페이지를 고치는 일 시작 거부(`jobs.FROZEN_TASKS` = write · polish · search · fix · images · ba_ja, `start_task`·`start_task_split` 둘 다). 코드 작업(refactor·optimize·fix_code·deploy)은 허용. 2026-11-21 okonsen·okcaddie·okramen을 2026-12-31까지 동결
-- 노출 감시 `watch_traffic()`: 하루 1번, 사이트마다 okadmin `fetch_gsc_pages`로 7일·35일 노출 합. 최근 7일 하루 평균 < 그전 28일 하루 평균 × `drop_ratio`(0.6)이고 그전 평균 ≥ `min_daily_impressions`(50)이면 동결 + 그 층 autoship 끔 + 이벤트(「SEO 감시 · 경보」) + `seo_alerts.json`. GSC 데이터는 2~3일 늦으므로 그만큼 늦게 잡힘
+- 노출 감시 `watch_traffic()`: 하루 1번, 사이트마다 okadmin `fetch_gsc_pages`로 노출 합. GSC 최신 `lag_days`(3)일은 아직 채워지는 중이라 빼고, 그 앞 7일 하루 평균 < 그전 28일 하루 평균 × `drop_ratio`(0.6)이고 그전 평균 ≥ `min_daily_impressions`(50)이면 (11/22 첫 버전은 최신 며칠을 그대로 넣어 jpcampus·krcampus를 잘못 동결 → 고침) 동결 + 그 층 autoship 끔 + 이벤트(「SEO 감시 · 경보」) + `seo_alerts.json`. GSC 데이터는 2~3일 늦으므로 그만큼 늦게 잡힘
 - 화면 배너·Mac 알림은 넣었다가 사장님 요청으로 뺌(`_seo_alert.html`은 빈 파일, `notify_mac`은 호출 없음). 확인은 현황 탭 GSC 그래프로
 - 사이트 저장소 쪽: okcaddie `request_indexing.py` · krcampus `scripts/gsc_resubmit.py` · companydb `script/gsc_resubmit.py`는 `ALLOW_INDEXING_API=1`일 때만 Indexing API 호출(2026-11-21)
 

@@ -38,6 +38,7 @@ DEFAULTS: dict[str, Any] = {
     "drop_ratio": 0.6,              # last 7 days below 60% of the previous 4 weeks' daily average = drop
     "min_daily_impressions": 50,    # ignore sites with less search traffic than this
     "freeze_days": 30,
+    "lag_days": 3,                  # newest GSC days still filling in: not compared
 }
 DATE_KEYS = ("date", "updated", "updated_at", "last_updated", "lastupdated", "lastmod", "modified", "published")
 TITLE_KEYS = ("title", "seo_title", "seo_description", "description", "meta_description")
@@ -207,11 +208,14 @@ def watch_traffic(force: bool = False) -> list[str]:
         gsc_url = str((site_analytics_config(s.oid) or {}).get("gsc_site_url") or "").strip()
         if not gsc_url:
             continue
-        last7, last35 = _impressions(gsc_url, 7), _impressions(gsc_url, 35)
-        if last7 is None or last35 is None:
+        # GSC's newest 2-3 days are still filling in: leave them out, or every site looks like it dropped.
+        lag, recent = int(cfg.get("lag_days", 3)), 7
+        d_lag, d_recent, d_all = (_impressions(gsc_url, lag), _impressions(gsc_url, lag + recent),
+                                  _impressions(gsc_url, lag + recent + 28))
+        if d_lag is None or d_recent is None or d_all is None:
             continue
-        before = max(last35 - last7, 0) / 28
-        now = last7 / 7
+        now = max(d_recent - d_lag, 0) / recent
+        before = max(d_all - d_recent, 0) / 28
         results[s.id] = {"now": round(now), "before": round(before)}
         if before >= cfg["min_daily_impressions"] and now < before * cfg["drop_ratio"]:
             text = (f"검색 노출 급락: 최근 7일 하루 {round(now)}회 · 그전 4주 하루 {round(before)}회. "
