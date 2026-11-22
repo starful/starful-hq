@@ -142,6 +142,12 @@
             {% if bad_tools %}
             <form method="post" action="{{ url_for('site_tools_check') }}" class="inline-form"><button class="act ghost small" type="submit">도구 다시 확인</button></form>
             {% endif %}
+            {% if queue_paused and not office.lights_off %}
+            <span class="chip bad" title="Claude 한도 등으로 이 사이트 실행 큐가 멈췄어요. 맡긴 일이 큐에만 쌓이고 시작하지 않아요">⏸ 실행 큐 멈춤</span>
+            {% if not claude_limit %}
+            <form method="post" action="{{ url_for('site_queue_pause') }}" class="inline-form"><input type="hidden" name="on" value="0"><button class="act small" type="submit">실행 큐 다시 켜기</button></form>
+            {% endif %}
+            {% endif %}
         </div>
 
         <div class="ss-block">

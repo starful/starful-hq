@@ -749,7 +749,9 @@ def site_status():
             proposal = planning.read(h["id"]) or {}
             if proposal:
                 break
+    from app.work import workqueue as _wq
     return _render_site("status", tool_rows=tools.status(), proposal=proposal,
+                        queue_paused=bool(_wq.prefs()["queue_paused"] or _wq._state().get("paused")),
                         focus_opts=planning.focus_map(),
                         meeting_on=meeting.running("all"), leaders_on=meeting.running("leaders"),
                         site_prefs=workqueue.prefs())

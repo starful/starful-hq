@@ -1351,6 +1351,8 @@ def start_fix_for_review(_from: str = "") -> tuple[str | None, str]:
         _save_followups(flow.get("pr") or {}, required, "에이전트가 못 고치는 파일 · 사람 확인 필요")
         # park the PR so 자동 진행 does not hand it out again every loop
         office.write_flow(review_round=max(int(flow.get("review_round") or 0), MAX_FIX_ROUNDS), needs_person=True)
+        jobs._refused(f"PR #{(flow.get('pr') or {}).get('number', '?')}은 에이전트가 못 고치는 지적 {len(required)}개가 남아 머지를 멈췄어요 · "
+                      "사람이 고치거나 GitHub에서 판단해 주세요 (followups.md)")
         return None, "needs_person"
     need_code = _required_points_at_code(required) or not _pr_has_posts(flow)
     if need_code:
