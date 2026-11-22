@@ -1123,8 +1123,10 @@
     const pop = document.getElementById("gpop");
     let openBtn = null;
     function closePop() { if (pop) pop.hidden = true; if (openBtn) openBtn.classList.remove("on"); openBtn = null; }
-    document.querySelectorAll("[data-gpop]").forEach((btn) => btn.addEventListener("click", (ev) => {
-        ev.stopPropagation();
+    // Delegated: the 한눈에 table is swapped in place by the refresher below, so buttons are looked up per click.
+    document.addEventListener("click", (ev) => {
+        const btn = ev.target.closest("[data-gpop]");
+        if (!btn) return;
         if (openBtn === btn) return closePop();
         closePop();
         const tpl = document.getElementById(btn.dataset.gpop);
@@ -1137,7 +1139,7 @@
         if (top + h > innerHeight - 8) top = Math.max(8, r.top - h - 8);
         pop.style.left = left + "px"; pop.style.top = top + "px";
         btn.classList.add("on"); openBtn = btn;
-    }));
+    });
     if (pop) pop.addEventListener("click", async (ev) => {
         const btn = ev.target.closest("[data-queue-start]");
         if (!btn) return;
@@ -1164,9 +1166,30 @@
             btn.disabled = false;
         }
     });
-    document.addEventListener("click", (ev) => { if (pop && !pop.hidden && !pop.contains(ev.target)) closePop(); });
+    document.addEventListener("click", (ev) => { if (pop && !pop.hidden && !pop.contains(ev.target) && !ev.target.closest("[data-gpop]")) closePop(); });
     document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closePop(); });
     addEventListener("scroll", closePop, { passive: true });
+})();
+(function () {
+    // 한눈에 stays current without reloading the page: every 30 s (and right after a queue start) the page is
+    // fetched again and only the table is swapped. Skipped while a popup is open or the tab is hidden.
+    const wrap = document.querySelector(".glance-card .glance-wrap");
+    const pop = document.getElementById("gpop");
+    if (!wrap) return;
+    let busy = false;
+    async function refresh() {
+        if (busy || document.hidden || (pop && !pop.hidden)) return;
+        busy = true;
+        try {
+            const html = await fetch(location.pathname + location.search, { headers: { "X-Glance": "1" } }).then((r) => r.ok ? r.text() : "");
+            const fresh = html && new DOMParser().parseFromString(html, "text/html").querySelector(".glance-card .glance-wrap");
+            if (fresh && fresh.innerHTML !== wrap.innerHTML && !(pop && !pop.hidden)) wrap.innerHTML = fresh.innerHTML;
+        } catch (_) {
+        } finally { busy = false; }
+    }
+    setInterval(refresh, 30000);
+    document.addEventListener("office:poke", () => setTimeout(refresh, 2500));
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 })();
 (function () {
     // Team-tab detail panel: default open under tabs (office map stays visible).
