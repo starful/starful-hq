@@ -95,7 +95,11 @@ def __getattr__(name: str):   # poicontent.CATEGORIES follows the current site: 
 _GUIDE_TOPIC = re.compile(
     r"(ガイド|가이드|比較|비교|アクセス|접근|가는\s*법|준비|고르는|렌탈|rental|"
     r"how\s*to|complete\s*guide|comparison|\bguides?\b|\baccess\b|"
-    r"완전\s*가이드|여행\s*가이드|예약\s*팁)",
+    r"완전\s*가이드|여행\s*가이드|예약\s*팁|"
+    # search-keyword topics (2026-11-23: 「富士山 キャンプ 予約 2027」「伊豆 ダイビング ルート おすすめ」 failed as one spot)
+    r"予約|ルート|おすすめ|オススメ|ランキング|人気|選び方|まとめ|初心者|持ち物|料金|時期|シーズン|穴場|モデルコース|"
+    r"예약|루트|코스|추천|순위|초보|준비물|요금|시기|"
+    r"\bbest\b|\btop\s*\d+|\bbooking\b|\broute\b|\bitinerary\b|\b20\d\d\b)",
     re.I,
 )
 
@@ -339,12 +343,9 @@ def plan(category: str, topic: str) -> dict[str, Any]:
             'Return ONLY JSON: {"name": "official English name (with branch for chains)", '
             f'"area": "city / neighborhood", "features": "comma tags: {k.features_hint}"}} — use null for name if unsure it exists.',
             timeout_sec=90, model=MODEL_LIGHT) or {}
-        if not data.get("name"):
-            raise RuntimeError(
-                f"「{topic[:30]}」 {k.noun_ko}을(를) 특정하지 못했어요. "
-                f"장소 이름·지역을 같이 적거나, 비교·가는 법·준비는 category를 가이드로 해요"
-            )
-        return {"name": str(data["name"]), "area": str(data.get("area") or ""), "features": str(data.get("features") or "")}
+        if data.get("name"):
+            return {"name": str(data["name"]), "area": str(data.get("area") or ""), "features": str(data.get("features") or "")}
+        # Not one real place (a search phrase like 「伊豆 ダイビング ルート おすすめ」): write it as a guide instead of failing.
     data = claude_json(
         f"For {k.domain}. Make a guide row for this topic: {topic}\n"
         'Return ONLY JSON: {"id": "short-id", "topic_en": "English guide topic", "topic_ko": "한국어 주제", "keywords": "english search keywords"}',
@@ -366,7 +367,9 @@ def guide_id(raw: str) -> str:
 def write(work, category: str, topic: str, row: dict[str, Any] | None = None) -> dict[str, Any]:
     category = resolve_category(category, topic)
     row = row or plan(category, topic)
-    return write_guide(work, row) if category == "가이드" else write_shop(work, row)
+    # plan() falls back to a guide row ({"id", "topic_en", …}) when the topic is not one real place
+    is_guide = category == "가이드" or ("topic_en" in row and "name" not in row)
+    return write_guide(work, row) if is_guide else write_shop(work, row)
 
 
 # ---------- research ----------

@@ -83,6 +83,7 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
 | campus_guides | `content/jpcontent.py` | 학교 가이드 · 번역 · Gemini/Imagen 커버 |
 | companydb | `content/cdbcontent.py` | EDINET/DART/SEC 공시 → 기업 페이지 · 로고 |
 | poi | `content/poicontent.py` | Google Places 조회 → Kit 필드 (okramen·okcaddie·okonsen·jpfun). `resolve_category`: 비교·ガイド·アクセス 등 가이드형 제목은 장소(noun)로 쓰지 않고 `가이드`로 강제 (회의 category 누락·기본값 cats[0] 오분류 방지) |
+| poi (11/23) | 〃 | 가이드 판정 `_GUIDE_TOPIC`에 검색어형 단어 추가(予約·ルート·おすすめ·ランキング·人気·選び方·初心者·料金·時期·예약·코스·추천·best·top N·연도 등). 장소로 판정됐는데 Claude가 실제 장소를 특정 못 하면 실패 대신 가이드로 씀(`plan` 폴백, `write`는 돌려받은 row 모양으로 가이드/장소 분기) |
 | "" | — | 없음 (krcare · sitekpi) |
 
 ## 4. 데이터 (`data/`)
