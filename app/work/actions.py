@@ -549,6 +549,7 @@ def run_idea(idea: dict[str, Any]) -> tuple[str | None, str]:
                 continue
             items.append([cat, t])
         if not items:
+            jobs._refused("이미 쓴 주제 · 건너뜀", "skip")
             return None, "이미 쓴 주제 · 건너뜀"
         started = jobs.start_task_split(
             "write", items, lambda n: f"회의 제안 {n}편 쓰기 시작", workers.write_topics,
@@ -559,17 +560,20 @@ def run_idea(idea: dict[str, Any]) -> tuple[str | None, str]:
         spec = f"{idea.get('title')}: {act.get('spec') or idea.get('how') or ''}"[:600]
         hold = pr_hold_reason("feature")
         if hold:
+            jobs._refused(hold, "held")
             return None, hold
         who = jobs.start_task(devwork.area_task(area), "회의 제안 기능 만들기 시작", devwork.refactor, "feature", area, spec, True)
         return who, "기능 만들기"
     if kind == "search":
         hold = pr_hold_reason("search")
         if hold:
+            jobs._refused(hold, "held")
             return None, hold
         return _search_from_idea(idea)
     if kind == "polish":
         hold = pr_hold_reason("polish")
         if hold:
+            jobs._refused(hold, "held")
             return None, hold
         who = _polish()
         return (who or None), ("글 다듬기" if who else (jobs.request_result().get("why") or "다듬을 글이 없어요"))
@@ -588,6 +592,8 @@ def proposal_run(pid: str, idx: int) -> dict[str, Any]:
     idea = ideas[idx]
     if idea.get("started"):
         return {"ok": False, "message": "이미 시작한 제안이에요"}
+    if idea.get("excluded"):
+        return {"ok": False, "message": "제외한 제안이에요 · 되살린 뒤 담아 주세요"}
     act = idea.get("action") if isinstance(idea.get("action"), dict) else {}
     kind = act.get("type") or "none"
     if kind == "none" or not ACTION_LABEL.get(kind):
@@ -618,6 +624,24 @@ def proposal_run(pid: str, idx: int) -> dict[str, Any]:
     if sid != sites.current_id():
         what = f"{sites.SITES[sid].label} · {what}"
     return {"ok": True, "message": f"{what}을(를) 큐에 담았어요"}
+
+
+def proposal_exclude(pid: str, idx: int, on: bool = True) -> dict[str, Any]:
+    """Leave one meeting idea out of 「승인 · 큐에 담기」 (on=False puts it back)."""
+    prop = planning.read(pid)
+    ideas = list(prop.get("ideas") or [])
+    if not prop.get("meeting") or not (0 <= idx < len(ideas)):
+        return {"ok": False, "message": "제안을 찾지 못했어요"}
+    if on and ideas[idx].get("started"):
+        return {"ok": False, "message": "이미 큐에 담은 제안이에요"}
+    idea = dict(ideas[idx])
+    if on:
+        idea["excluded"] = True
+    else:
+        idea.pop("excluded", None)
+    ideas[idx] = idea
+    planning.update(prop.get("id") or pid, ideas=ideas)
+    return {"ok": True, "message": "제외했어요" if on else "되살렸어요"}
 
 
 def proposal_enqueue_all(pid: str) -> dict[str, Any]:

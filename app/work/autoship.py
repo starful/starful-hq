@@ -175,6 +175,13 @@ def _deploy_ready() -> tuple[bool, str]:
 
 
 def next_step() -> str | None:
+    """Autoship retries every loop by itself, so its refused starts are not parked in the run queue."""
+    from app.office import jobs
+    with jobs.no_queue():
+        return _next_step()
+
+
+def _next_step() -> str | None:
     """Hand out the next step for the current site. Returns the person it went to (or None)."""
     from app.office import jobs
     from app import office

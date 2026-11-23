@@ -70,6 +70,13 @@ def halt_claude_limit(reason: str = "") -> str:
 
     blocked, why = claude_blocked()
     msg = reason or why or "Claude 사용 한도"
+    first = claude_halt_info() is None
+    # what was on before, so resume_after_halt() can put exactly that back (2026-11-23)
+    was_on = [oid for oid, on in autoship.office_states().items() if on] if first else \
+        list((claude_halt_info() or {}).get("autoship_was_on") or [])
+    queues_on = [s.id for s in sites.enabled()
+                 if not (workqueue.prefs(s.id)["queue_paused"] or workqueue._state(s.id).get("paused"))] if first else \
+        list((claude_halt_info() or {}).get("queues_were_on") or [])
     with _HALT_LOCK:
         DATA.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -77,8 +84,17 @@ def halt_claude_limit(reason: str = "") -> str:
             "reason": msg[:240],
             "autoship_off": True,
             "queues_paused": True,
+            "autoship_was_on": was_on,
+            "queues_were_on": queues_on,
         }
         _HALT_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    if first:
+        try:
+            from app import office
+            office.append_event(who="HQ", dept="한도", text=f"Claude 한도 · 자동 진행·실행 큐를 멈췄어요 ({msg[:80]}) · 풀리면 다시 켜요",
+                                state="wait", site="")
+        except Exception as exc:  # noqa: BLE001
+            print(f"halt event: {exc}")
     for oid in sites.OFFICES:
         try:
             autoship.set_enabled(False, office_id=oid)
@@ -93,6 +109,34 @@ def halt_claude_limit(reason: str = "") -> str:
     with _LOCK:
         _CACHE["at"] = 0.0
     return f"Claude 한도로 자동 진행·실행 큐를 멈췄어요 · {msg}"
+
+
+def resume_after_halt() -> bool:
+    """When the Claude limit is gone, turn back on exactly what the halt turned off. Returns True if resumed."""
+    info = claude_halt_info()
+    if not info or claude_blocked()[0]:
+        return False
+    from app import sites
+    from app.work import autoship, workqueue
+    for oid in info.get("autoship_was_on") or []:
+        try:
+            autoship.set_enabled(True, office_id=oid)
+        except Exception as exc:  # noqa: BLE001
+            print(f"resume autoship {oid}: {exc}")
+    for sid in info.get("queues_were_on") or []:
+        if sid in sites.SITES:
+            try:
+                with sites.use(sid):
+                    workqueue.set_paused(False)
+            except Exception as exc:  # noqa: BLE001
+                print(f"resume queue {sid}: {exc}")
+    clear_claude_halt()
+    try:
+        from app import office
+        office.append_event(who="HQ", dept="한도", text="Claude 한도가 풀려서 자동 진행·실행 큐를 다시 켰어요", site="")
+    except Exception as exc:  # noqa: BLE001
+        print(f"resume event: {exc}")
+    return True
 
 
 def clear_claude_halt() -> None:

@@ -27,6 +27,35 @@ STATUS_RUNNING = "running"
 STATUS_DONE = "done"
 STATUS_FAILED = "failed"
 STATUS_HELD = "held"  # e.g. open PR blocks feature work
+# Restarted mid-way: content work is simply tried again; code/PR work waits for a person (could double a PR).
+RETRY_ON_RESTART = ("write", "search", "polish", "analyze", "research", "images", "ba_ja", "propose", "queue")
+_SKIP_WORDS = ("이미 쓴", "건너뜀", "고칠 글", "다듬을 글", "비어")   # old refusals without a code
+
+
+def classify_refusal(code: str, why: str) -> str:
+    """jobs reason code (+ old wording as fallback) → done | held | failed | wait."""
+    from app.office import jobs
+    if code == "skip" or (not code and any(w in why for w in _SKIP_WORDS)):
+        return "done"
+    if code in jobs.HOLD_CODES or (not code and "PR" in why and "머지" in why):
+        return "held"
+    if code == "never":
+        return "failed"
+    return "wait"
+
+
+def _after_refusal(item: dict[str, Any], why: str, code: str) -> None:
+    """Put a refused queue row where it belongs and keep the reason on it."""
+    kind = classify_refusal(code, why)
+    why = (why or "").strip()[:200]
+    if kind == "done":
+        _mark(item["id"], status=STATUS_DONE, finished_at=_stamp(), error=why)
+    elif kind == "held":
+        _mark(item["id"], status=STATUS_HELD, error=why, hold=code or "held")
+    elif kind == "failed":
+        _mark(item["id"], status=STATUS_FAILED, finished_at=_stamp(), error=why)
+    elif why:
+        _mark(item["id"], error=why, wait=code or "busy")
 
 
 def _stamp() -> str:
@@ -174,6 +203,22 @@ def _site_has_live_job(site_id: str) -> bool:
     return False
 
 
+def _reopen_idea(x: dict[str, Any]) -> None:
+    """A meeting row that will run again: clear the idea's 「started」 so the queue can start it."""
+    if x.get("source") != "meeting" or not x.get("pid"):
+        return
+    try:
+        from app.work import planning
+        prop = planning.read(str(x["pid"]))
+        ideas = list(prop.get("ideas") or [])
+        i = int(x.get("idx") if x.get("idx") is not None else -1)
+        if prop.get("id") and 0 <= i < len(ideas) and ideas[i].get("started"):
+            ideas[i] = {k: v for k, v in ideas[i].items() if k != "started"}
+            planning.update(prop["id"], ideas=ideas)
+    except Exception as exc:  # noqa: BLE001
+        print(f"workqueue reopen idea: {exc}")
+
+
 def sweep_zombies(site_id: str | None = None) -> int:
     """Mark queue rows stuck as running with no live job → failed.
     Server restart kills the finish watcher; without this, 한눈에·버튼이 영원히「진행 중」."""
@@ -186,9 +231,17 @@ def sweep_zombies(site_id: str | None = None) -> int:
         for x in state["items"]:
             if x.get("status") != STATUS_RUNNING:
                 continue
-            x["status"] = STATUS_FAILED
-            x["finished_at"] = _stamp()
-            x["error"] = (x.get("error") or "") or "잡이 끊김 · 다시 담아 주세요"
+            task = str(x.get("task") or "")
+            if task in RETRY_ON_RESTART and int(x.get("retries") or 0) < 1:
+                x["status"] = STATUS_QUEUED          # content work: try once more by itself
+                x["retries"] = int(x.get("retries") or 0) + 1
+                x["error"] = "HQ 재시작으로 끊겨서 다시 대기"
+                _reopen_idea(x)
+            else:
+                x["status"] = STATUS_HELD            # code / PR work: a person decides
+                x["hold"] = "restart"
+                x["error"] = "HQ 재시작으로 끊겼어요 · 확인 후 「지금 시작」"
+                _reopen_idea(x)
             n += 1
         if n:
             _save(state, sid)
@@ -257,6 +310,9 @@ def _dedupe_key(item: dict[str, Any]) -> str:
         return f"meeting:{(item.get('pid') or '')}:{(item.get('idx'))}"
     if src == "task":
         return f"task:{(item.get('task') or '')}"
+    if src == "call":
+        c = item.get("call") or {}
+        return f"call:{item.get('task')}:{c.get('fn')}:{json.dumps([c.get('args'), c.get('items')], ensure_ascii=False, sort_keys=True)}"
     return f"{src}:{item.get('title') or item.get('id')}"
 
 
@@ -282,10 +338,13 @@ def enqueue(item: dict[str, Any], site_id: str | None = None) -> dict[str, Any] 
             "idx": item.get("idx"),
             "action": item.get("action") if isinstance(item.get("action"), dict) else {},
             "label": str(item.get("label") or "")[:120],
+            "priority": int(item.get("priority") or 0),
             "error": "",
             "started_at": "",
             "finished_at": "",
         }
+        if isinstance(item.get("call"), dict):
+            row["call"] = item["call"]
         if item.get("hold"):
             row["status"] = STATUS_HELD
             row["error"] = str(item.get("hold_reason") or "보류")[:200]
@@ -304,7 +363,7 @@ def enqueue_meeting(pid: str, site_id: str | None = None) -> int:
     ideas = prop.get("ideas") or []
     n = 0
     for idx, idea in enumerate(ideas):
-        if idea.get("started"):
+        if idea.get("started") or idea.get("excluded"):
             continue
         act = idea.get("action") if isinstance(idea.get("action"), dict) else {}
         kind = act.get("type") or "none"
@@ -384,13 +443,25 @@ def _release_held() -> None:
         flow = office.read_flow()
         open_pr = bool(flow.get("pr")) and not flow.get("merged")
         changed = False
+        from app.work import seo_guard
+        from app.office import staffing
+        sid = sites.current_id()
         for x in state["items"]:
             if x.get("status") != STATUS_HELD:
                 continue
             task = str(x.get("task") or "")
-            if task in actions.PR_HOLD_TASKS and not open_pr:
+            code = str(x.get("hold") or "held")
+            free = {
+                "held": (task in actions.PR_HOLD_TASKS or code == "held") and not open_pr,
+                "frozen": not seo_guard.frozen(sid),
+                "nobody": sites.current().office not in staffing.closed_offices(),
+                "person": not flow.get("needs_person"),
+                "restart": False,   # a person presses 「지금 시작」
+            }.get(code, task in actions.PR_HOLD_TASKS and not open_pr)
+            if free:
                 x["status"] = STATUS_QUEUED
                 x["error"] = ""
+                x.pop("hold", None)
                 changed = True
         if changed:
             _save(state)
@@ -402,9 +473,11 @@ def _start_item(item: dict[str, Any]) -> bool:
     from app.office import jobs
     from app.work import planning
     sid = item.get("site") or sites.current_id()
-    with sites.use(sid):
+    with sites.use(sid), jobs.no_queue():
         jobs.reset_request()
         source = item.get("source")
+        if source == "call":
+            return _start_call(item)
         if source == "meeting":
             pid = item.get("pid") or ""
             idx = int(item.get("idx") if item.get("idx") is not None else -1)
@@ -423,18 +496,13 @@ def _start_item(item: dict[str, Any]) -> bool:
                 return False
             who, what = actions.run_idea(ideas[idx])
             if not who:
-                why = (jobs.request_result().get("why") or what or "").strip()
-                if "이미 쓴" in why or "건너뜀" in why or "고칠 글" in why or "비어" in why or "다듬을 글" in why:
+                res = jobs.request_result()
+                why = (res.get("why") or what or "").strip()
+                code = res.get("code") or ""
+                if classify_refusal(code, why) == "done":
                     ideas[idx]["started"] = f"{_stamp()[:16]} · {why}"
                     planning.update(prop["id"], ideas=ideas)
-                    _mark(item["id"], status=STATUS_DONE, finished_at=_stamp(), error=why[:200])
-                    return False
-                if "PR" in why and "머지" in why:
-                    _mark(item["id"], status=STATUS_HELD, error=why[:200])
-                    return False
-                # busy / capacity: leave queued for next kick — keep a useful tip on the row
-                if why and why != "검색 글 고치기":
-                    _mark(item["id"], error=why[:200])
+                _after_refusal(item, "" if why == "검색 글 고치기" else why, code)
                 return False
             ideas[idx]["started"] = f"{_stamp()[:16]} · {what}"
             planning.update(prop["id"], ideas=ideas)
@@ -462,11 +530,41 @@ def _start_item(item: dict[str, Any]) -> bool:
             else:
                 who = actions.run_waiting(task)
             if not who:
+                res = jobs.request_result()
+                _after_refusal(item, res.get("why") or "", res.get("code") or "")
                 return False
             _mark(item["id"], status=STATUS_RUNNING, started_at=_stamp(), error="")
             threading.Thread(target=_finish_when_idle, args=(item["id"], sid), daemon=True).start()
             return True
     return False
+
+
+def _start_call(item: dict[str, Any]) -> bool:
+    """A start parked by jobs._park: call the same function with the same arguments."""
+    import importlib
+    from app.office import jobs
+    c = item.get("call") or {}
+    try:
+        mod, qual = str(c.get("fn") or "").split(":", 1)
+        fn: Any = importlib.import_module(mod)
+        for part in qual.split("."):
+            fn = getattr(fn, part)
+    except Exception as exc:  # noqa: BLE001
+        _mark(item["id"], status=STATUS_FAILED, finished_at=_stamp(), error=f"다시 부를 수 없어요 ({c.get('fn')}: {exc})"[:200])
+        return False
+    task, line, args = str(item.get("task") or ""), str(c.get("line") or item.get("title") or "시작"), list(c.get("args") or [])
+    if c.get("items"):
+        started = jobs.start_task_split(task, list(c["items"]), lambda n: line.replace("{n}", str(n)), fn, *args)
+        who = bool(started)
+    else:
+        who = jobs.start_task(task, line, fn, *args)
+    if not who:
+        res = jobs.request_result()
+        _after_refusal(item, res.get("why") or "", res.get("code") or "")
+        return False
+    _mark(item["id"], status=STATUS_RUNNING, started_at=_stamp(), error="")
+    threading.Thread(target=_finish_when_idle, args=(item["id"], item.get("site") or sites.current_id()), daemon=True).start()
+    return True
 
 
 def _finish_when_idle(item_id: str, site_id: str) -> None:
@@ -505,6 +603,7 @@ def next_item() -> bool:
     with _LOCK:
         state = _state()
         pending = [x for x in state["items"] if x.get("status") == STATUS_QUEUED]
+    pending.sort(key=lambda x: -int(x.get("priority") or 0))   # stable: same priority keeps queue order
     for item in pending:
         if _start_item(item):
             return True
@@ -534,6 +633,11 @@ def start_now(item_id: str, site_id: str | None = None) -> dict[str, Any]:
         st = str(item.get("status") or "")
         if st == STATUS_RUNNING:
             return {"ok": False, "msg": "이미 진행 중이에요"}
+        if st == STATUS_HELD and item.get("hold") == "restart":
+            item["status"], item["error"] = STATUS_QUEUED, ""   # a person said go
+            item.pop("hold", None)
+            _save(state, sid)
+            st = STATUS_QUEUED
         if st == STATUS_HELD:
             return {"ok": False, "msg": item.get("error") or "보류 중이에요 · PR 머지 후 자동으로 빠져요"}
         if st != STATUS_QUEUED:
@@ -599,6 +703,11 @@ def kick(site_id: str) -> None:
 def _loop() -> None:
     time.sleep(45)
     while True:
+        try:
+            from app import tools as tools_mod
+            tools_mod.resume_after_halt()
+        except Exception as exc:  # noqa: BLE001
+            print(f"workqueue resume: {exc}")
         for s in sites.enabled():
             try:
                 with sites.use(s.id):
@@ -616,7 +725,8 @@ def start_loop() -> None:
     _STARTED = True
     for s in sites.enabled():
         try:
-            sweep_zombies(s.id)
+            with sites.use(s.id):
+                sweep_zombies(s.id)
         except Exception as exc:  # noqa: BLE001
             print(f"workqueue sweep {s.id}: {exc}")
     threading.Thread(target=_loop, name="workqueue", daemon=True).start()

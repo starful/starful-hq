@@ -2698,3 +2698,21 @@ button.sending { opacity: .6; cursor: progress; }
 .office-map.lights-off .floor-img, .office-map.lights-off .floor-front { filter: brightness(.35) saturate(.4); }
 .office-map .lights-off-veil { position: absolute; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: rgba(10, 14, 30, .35); pointer-events: none; }
 .office-map .lights-off-veil span { background: rgba(20, 24, 40, .85); color: #f3f0e6; font-size: 14px; font-weight: 600; padding: 8px 16px; border-radius: 999px; }
+
+/* 회의 결과: 제외한 제안 (2026-11-23) */
+.ideas li.idea-excluded { opacity: .45; }
+.ideas li.idea-excluded .idea-title { text-decoration: line-through; }
+.idea-excluded-tag { font-size: 11px; color: #8a91a3; margin-right: 4px; }
+.idea-exclude-btn { background: none; border: 0; padding: 2px 4px; font-size: 11px; color: #8a91a3; cursor: pointer; text-decoration: underline; }
+.idea-exclude-btn:hover { color: #b3261e; }
+.idea-run form { display: inline-block; }
+
+/* 한눈에 큐 현황 한 줄 (2026-11-23) */
+.qboard { margin: 0 0 6px; }
+.qb-btn { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
+.qb-btn span { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #eef0f4; color: #5b6275; }
+.qb-btn .qb-slot { background: #e6f0ff; color: #1a56c4; font-weight: 600; }
+.qb-btn .qb-slot.full { background: #fdecea; color: #b3261e; }
+.qb-btn .qb-n.on { background: #fff3e0; color: #a15c00; }
+.qb-btn .qb-n.bad { background: #fdecea; color: #b3261e; }
+.qb-btn:hover span { filter: brightness(.96); }

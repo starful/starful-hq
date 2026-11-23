@@ -304,6 +304,37 @@ def _site():
     return snap, snapshot.site_data(snap)
 
 
+def _queue_board() -> dict:
+    """한눈에 맨 위 한 줄: 동시 작업 자리(n/MAX) · 대기 · 보류 · 멈춘 큐 — 눌러서 사이트별 목록."""
+    from app.work import workqueue
+    staff = office.ALL_ROSTER if isinstance(getattr(office, "ALL_ROSTER", None), dict) else {}
+    running = []
+    for role, j in jobs.all_jobs().items():
+        if not j.get("running"):
+            continue
+        sid = str(j.get("site") or "")
+        name = (staff.get(role) or {}).get("name") or role
+        running.append({"who": name, "site": sid, "label": sites.SITES[sid].label if sid in sites.SITES else sid,
+                        "line": str(j.get("line") or "")[:80], "meeting": str(j.get("task") or "").startswith("meeting")})
+    heavy = sum(1 for r in running if not r["meeting"])
+    waiting, held, paused = [], [], []
+    for s in sites.enabled():
+        with sites.use(s.id):
+            p = workqueue.prefs(s.id)
+            if p.get("queue_paused") or workqueue._state(s.id).get("paused"):
+                paused.append(s.label)
+            for x in workqueue.list_items(s.id, include_done=False):
+                row = {"site": s.label, "title": str(x.get("label") or x.get("task") or "")
+                       + (" · " + str(x.get("title"))[:60] if x.get("title") else ""),
+                       "why": str(x.get("error") or "")[:120], "at": str(x.get("at") or "")[5:16]}
+                if x.get("status") == workqueue.STATUS_QUEUED:
+                    waiting.append(row)
+                elif x.get("status") == workqueue.STATUS_HELD:
+                    held.append(row)
+    return {"max": sites.MAX_CONCURRENT, "busy": heavy, "running": running,
+            "waiting": waiting, "held": held, "paused": paused}
+
+
 def _glance(snap: dict) -> list[dict]:
     """한눈에: every enabled site on every floor (snapshot numbers per site)."""
     from app.work import workqueue
@@ -398,6 +429,7 @@ def _render_site(step: str, **extra):
         affiliate=affiliate.summary(),
         aff_sync=affsync.summary(),
         glance=_glance(snap),
+        qboard=_queue_board(),
         ship_stage=_ship_stage(site) if step == "status" else None,
         next_up=_next_up(),
         cost_cached=_cost_cached(),
@@ -927,6 +959,20 @@ def site_meeting_run():
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify({"ok": out.get("ok"), "message": out.get("message"), "msg": out.get("message")})
     return _back("meet", proposal=request.form.get("pid") or "")
+
+
+@app.post("/site/<site>/meeting/exclude")
+def site_meeting_exclude():
+    """회의 결과: leave one idea out of the approval (or put it back)."""
+    try:
+        idx = int(request.form.get("idx") or -1)
+    except ValueError:
+        idx = -1
+    pid = (request.form.get("pid") or "").strip()
+    out = actions.proposal_exclude(pid, idx, on=request.form.get("on", "1") == "1")
+    if _fetch():
+        return jsonify({"ok": out.get("ok"), "msg": out.get("message")})
+    return _back("meet", proposal=pid)
 
 
 @app.post("/site/<site>/queue/pause")
