@@ -477,7 +477,7 @@ def _release_held() -> None:
                 "held": (task in actions.PR_HOLD_TASKS or code == "held") and not open_pr,
                 "frozen": not seo_guard.frozen(sid),
                 "nobody": sites.current().office not in staffing.closed_offices(),
-                "person": not flow.get("needs_person"),
+                "person": not flow.get("needs_person") or not open_pr,   # PR merged/closed: nothing left to decide
                 "restart": False,   # a person presses 「지금 시작」
             }.get(code, task in actions.PR_HOLD_TASKS and not open_pr)
             if free:
