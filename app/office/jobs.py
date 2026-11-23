@@ -139,10 +139,11 @@ def start(role: str, start_line: str, target: Callable[..., str], *args: Any,
     _task/_items record what is being done so nobody else is handed the same work meanwhile.
     """
     site = sites.current_id()
+    _cap = max_concurrent()   # outside _LOCK: reads the staff files
     with _LOCK:
         if (JOBS.get(role) or {}).get("running"):
             return False
-        if not _task.startswith("meeting") and not getattr(_IN_JOB, "on", False) and _heavy_count() >= sites.MAX_CONCURRENT:
+        if not _task.startswith("meeting") and not getattr(_IN_JOB, "on", False) and _heavy_count() >= _cap:
             return False   # usage limit guard; a hand-off from a running job still goes through
         JOBS[role] = {"running": True, "kind": role, "line": start_line, "state": "work", "site": site,
                       "task": _task, "items": [str(i) if not isinstance(i, (list, tuple)) else str(i[-1]) for i in (_items or [])]}
@@ -206,9 +207,32 @@ def _heavy_count() -> int:
     return sum(1 for j in JOBS.values() if j.get("running") and not str(j.get("task") or "").startswith("meeting"))
 
 
+def max_concurrent() -> int:
+    """How many Claude jobs may run at once over all sites (2026-11-24: was a flat 6).
+
+    One per working person: the sum of team members (plan · mkt · design · dev) on open floors (not B1 TF),
+    so each team can have as many jobs as it has people. NEXT_MAX_JOBS in the environment still wins.
+    """
+    import os
+    env = (os.environ.get("NEXT_MAX_JOBS") or "").strip()
+    if env.isdigit() and int(env) > 0:
+        return int(env)
+    try:
+        from app.office import staffing
+        closed = set(staffing.closed_offices())
+        n = sum(1 for p in staffing.active_staff_dicts()
+                if p.get("team") in office.TEAM_INFO and p.get("office") not in closed
+                and p.get("office") != "basement" and not p.get("temp"))   # B1 TF only meets
+        return max(n, 1)
+    except Exception as exc:  # noqa: BLE001
+        print(f"max_concurrent: {exc}")
+        return sites.MAX_CONCURRENT
+
+
 def at_capacity() -> bool:
+    cap = max_concurrent()
     with _LOCK:
-        return _heavy_count() >= sites.MAX_CONCURRENT
+        return _heavy_count() >= cap
 
 
 def free_members(team: tuple[str, ...] | list[str]) -> list[str]:

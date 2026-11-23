@@ -331,7 +331,7 @@ def _queue_board() -> dict:
                     waiting.append(row)
                 elif x.get("status") == workqueue.STATUS_HELD:
                     held.append(row)
-    return {"max": sites.MAX_CONCURRENT, "busy": heavy, "running": running,
+    return {"max": jobs.max_concurrent(), "busy": heavy, "running": running,
             "waiting": waiting, "held": held, "paused": paused}
 
 
