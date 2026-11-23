@@ -158,7 +158,7 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
 - `LOOP_SEC = 60` · `KICK_DELAY = 4.0` (잡 종료 후 다음 시작)
 - **입구 하나 (2026-11-23):** `jobs.start_task` / `start_task_split`은 바로 시작하거나, 자리·근무시간·WIP 때문에 거부되면 `jobs._park`가 같은 함수(`module:qualname`)·인자(JSON)를 `source: "call"` 행으로 큐에 담는다(같은 일은 한 번만). 화면 메시지는 「실행 큐에 담았어요 · 자리가 나면 차례로 시작해요」(큐가 멈춰 있으면 그 안내 추가). 잡 안에서 넘긴 일(hand-off)은 `priority: 2`로 먼저. autoship·autodev는 스스로 다시 시도하므로 `jobs.no_queue()` 안에서 부르고 담지 않음. 람다·클로저로 시작하는 일은 담지 못함(그대로 거부)
 - **거부 코드:** `jobs._refused(why, code)` → `request_result()["code"]`. busy·capacity·hours·wip → 대기(queued 유지, 이유 표시) · frozen·nobody·person·held → held · skip → done · never → failed (`workqueue.classify_refusal`; 코드 없는 옛 문구는 낱말로 대신 판단)
-- held 풀기(`_release_held`, 코드별): held(열린 PR) → PR 머지 후 · frozen → 동결 풀린 뒤 · nobody → 층 불 켜진 뒤 · person → `flow.needs_person` 풀린 뒤 · restart → 사람이 「지금 시작」
+- held 풀기(`_release_held`, 코드별): PR을 기다리던 review·fix·fix_code·push는 PR이 머지·종료되면 done · held(열린 PR) → PR 머지 후 · frozen → 동결 풀린 뒤 · nobody → 층 불 켜진 뒤 · person → `flow.needs_person` 풀린 뒤 · restart → 사람이 「지금 시작」
 - `sweep_zombies`(시작 시·매 루프): 재시작으로 끊긴 running → 글·리서치류(`RETRY_ON_RESTART`)는 1번 queued로 되돌림(회의 제안 `started`도 지움) · 코드·PR 일은 held(`hold: restart`, 「확인 후 지금 시작」)
 - 우선순위: `priority` 높은 것 먼저, 같으면 담긴 순서
 - 회의 제안은 **자동으로 담지 않는다**(사장님 승인). 회의 결과 「승인 · 큐에 담기 (N건)」 · 제안별 「제외」/「되살리기」(`POST /site/<site>/meeting/exclude`, `idea.excluded`). 제외한 제안은 `enqueue_meeting`·`proposal_run`이 건너뜀
@@ -199,6 +199,7 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
 - `check_diff(git, base, head)` / `check_branch(git, branch)` → 막는 이유 목록. HQ에서 하는 **모든 머지**(자동·버튼) 전에 `merge_pr`가 부름. 막히면 GitHub에서 사람이 직접 머지해야 함
   - DB 파일(`*.sqlite3` · `*.db`) 추가
   - Indexing API 호출(`indexing.googleapis.com` · `urlNotifications`) 추가
+  - 글(`content/` 아래 .md)에 AI 작업 메모가 추가됨 (`seo_guard.LEAK` · `leaked_lines`: seo-safety.mdc·Read 도구·this session·「Here's the guide」·content_pipeline·/opt/work/ 등). okadmin `llm_claude.claude_text`도 중립 폴더(`~/.cache/claude-text-cwd`)에서 돌려 CLAUDE.md를 안 읽고, 앞머리 메모는 `strip_meta`로 잘라냄 (2026-11-23)
   - 기존 페이지(`.md/.markdown/.mdx`) 수정 > `max_existing_pages`(5)
   - 본문은 그대로이고 날짜 키(`DATE_KEYS`)만 바뀐 페이지 1개 이상
   - 본문 변경 없이 날짜를 뒤로 민 페이지 1개 이상

@@ -480,6 +480,12 @@ def _release_held() -> None:
                 "person": not flow.get("needs_person") or not open_pr,   # PR merged/closed: nothing left to decide
                 "restart": False,   # a person presses 「지금 시작」
             }.get(code, task in actions.PR_HOLD_TASKS and not open_pr)
+            if task in ("review", "fix", "fix_code", "push") and not open_pr:
+                x["status"], x["finished_at"] = STATUS_DONE, _stamp()   # the PR it waited on is gone
+                x["error"] = "PR이 머지·종료돼서 정리"
+                x.pop("hold", None)
+                changed = True
+                continue
             if free:
                 x["status"] = STATUS_QUEUED
                 x["error"] = ""

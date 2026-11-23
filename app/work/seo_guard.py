@@ -124,6 +124,34 @@ def _digits(value: str) -> str:
     return re.sub(r"\D", "", value or "")[:8]
 
 
+# A model talking about the job instead of writing the page (2026-11-23: 「Read 도구가 없어서…」 went live).
+# Same idea as okadmin llm_claude._META_LINE, kept here so the merge guard has no outside import.
+LEAK = re.compile(
+    r"(seo-safety\.mdc|\.cursor/rules|CLAUDE\.md"
+    r"|\b(Read|Write|Bash|Edit)\b[^\n]{0,40}\btools?\b[^\n]{0,60}(available|使え|사용할 수)"
+    r"|file[- ](read|write|edit|tool)[^\n]{0,40}(available|access)"
+    r"|\bthis session\b|このセッション|이 세션에서"
+    r"|^Here(?:'s| is) the (?:guide|article|post|content|finished|full|revised|updated|rewritten)[^\n]{0,60}:?\s*$"
+    r"|^(?:Quick note before|Before I continue|Noted —|I can't run this|I'll proceed)"
+    r"|content_pipeline|/opt/work/|You are a pure text generator"
+    r"|^먼저 짚어드릴 점|^본문 초안 작성을 마쳤)",
+    re.I,
+)
+
+
+def leaked_lines(patch: str) -> list[tuple[str, str]]:
+    """(file, line) for added content lines that look like model meta talk."""
+    out: list[tuple[str, str]] = []
+    path = ""
+    for ln in patch.splitlines():
+        if ln.startswith("+++ "):
+            path = ln[6:] if ln.startswith("+++ b/") else ""
+            continue
+        if path.lower().endswith(CONTENT_EXT) and "content/" in path and ln.startswith("+") and LEAK.search(ln[1:].strip()):
+            out.append((path, ln[1:].strip()[:120]))
+    return out
+
+
 def check_diff(git, base: str, head: str) -> list[str]:
     """Blockers for the change base...head. git(*args) runs git in the site repo."""
     cfg = config()
@@ -138,6 +166,9 @@ def check_diff(git, base: str, head: str) -> list[str]:
     patch = git("diff", f"{base}...{head}").stdout
     if any(INDEXING_API.search(ln) for ln in patch.splitlines() if ln.startswith("+") and not ln.startswith("+++")):
         blockers.append("Indexing API 호출이 추가됐어요 (일반 페이지에 쓰면 사이트 전체가 위험해요)")
+    leaks = leaked_lines(patch)
+    if leaks:
+        blockers.append(f"글에 AI 작업 메모가 섞여 있어요 ({leaks[0][0]}: 「{leaks[0][1][:60]}」 등 {len(leaks)}줄) · 지우고 올려 주세요")
 
     modified = [r[-1] for r in rows if r[0].startswith("M") and r[-1].lower().endswith(CONTENT_EXT)]
     if len(modified) > cfg["max_existing_pages"]:
