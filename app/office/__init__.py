@@ -724,8 +724,11 @@ def build_office(
     try:
         from app.work import workqueue
         in_queue = workqueue.pending_tasks()
+        queue_labels = workqueue.pending_labels()
+        person_holds = {str(x.get("task") or "") for x in workqueue.list_items(include_done=False)
+                        if x.get("status") == workqueue.STATUS_HELD and x.get("hold") in ("person", "restart")}
     except Exception:  # noqa: BLE001
-        in_queue = {}
+        in_queue, queue_labels, person_holds = {}, {}, set()
 
     from app.office import schedule
     occupied: dict[str, dict[str, Any]] = {}
@@ -785,10 +788,12 @@ def build_office(
                 continue
             for person in ordered_members(task):
                 if person not in occupied and person not in away:
-                    if task in in_queue:
-                        from app.work import workqueue
-                        msg = workqueue.pending_label(in_queue[task])
-                        occupied[person] = _seat(person, "think", msg, task, run="")
+                    if task in person_holds:
+                        # waiting for a person: say so and give the button (pressing it = 「확인했어요 · 다시」)
+                        again = "확인했어요 · 다시 리뷰" if task == "review" else "다시 시작"
+                        occupied[person] = _seat(person, "idle", f"{queue_labels.get(task, '보류')} · {line}", task, run=again)
+                    elif task in in_queue:
+                        occupied[person] = _seat(person, "think", queue_labels.get(task) or line, task, run="")
                     else:
                         run = "" if (task_group(task) in busy_groups and task not in ITEM_TASKS) else run_label(task, line)
                         occupied[person] = _seat(person, "idle", line, task, run)

@@ -401,7 +401,7 @@ def _render_site(step: str, **extra):
     from app.work import workqueue
     pending = workqueue.pending_tasks()
     extra.setdefault("queue_pending", pending)
-    extra.setdefault("queue_pending_label", {t: workqueue.pending_label(st) for t, st in pending.items()})
+    extra.setdefault("queue_pending_label", workqueue.pending_labels())
     snap, site = _site()
     all_jobs = jobs.all_jobs()
     flow = office.read_flow()
@@ -1303,9 +1303,24 @@ def site_run(task: str):
     if task not in waiting and task not in ("write", "search", "issue", "review", "deploy"):
         msg = "지금 할 일이 없어요"
         return jsonify({"ok": False, "msg": msg}) if _fetch() else redirect(url_for("site_status"))
+    held = next((x for x in workqueue.list_items(include_done=False)
+                 if x.get("task") == task and x.get("status") == workqueue.STATUS_HELD), None)
+    if held and held.get("hold") in ("person", "restart"):
+        # a person pressed it: that is the 「사람 확인」 the row was waiting for → look at the PR again
+        if held.get("hold") == "person":
+            office.write_flow(needs_person=False, reviewed=False, review_round=0)
+        workqueue.requeue(str(held.get("id")))
+        workqueue.kick(sites.current_id())
+        msg = f"다시 맡겼어요 · {label} (PR을 처음부터 다시 리뷰해요)" if held.get("hold") == "person" else f"다시 맡겼어요 · {label}"
+        return jsonify({"ok": True, "msg": msg, "queued": True, "label": workqueue.pending_label("queued")}) if _fetch() \
+            else redirect(request.form.get("next") or url_for("site_status"))
     row = workqueue.enqueue_task(task, label)
     if not row:
-        msg = workqueue.pending_label(workqueue.pending_tasks().get(task, "queued"))
+        msg = workqueue.pending_labels().get(task) or workqueue.pending_label("queued")
+        held = next((x for x in workqueue.list_items(include_done=False)
+                     if x.get("task") == task and x.get("status") == workqueue.STATUS_HELD), None)
+        if held and held.get("error"):
+            msg = f"{msg} · {str(held['error'])[:160]}"
         return jsonify({"ok": False, "msg": f"이미 {msg}", "queued": True}) if _fetch() else redirect(request.form.get("next") or url_for("site_status"))
     msg = f"큐에 담았어요 · 곧 시작 · {label}"
     return jsonify({"ok": True, "msg": msg, "queued": True, "label": workqueue.pending_label("queued")}) if _fetch() \

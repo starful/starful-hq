@@ -184,8 +184,30 @@ def pending_tasks(site_id: str | None = None) -> dict[str, str]:
     return out
 
 
-def pending_label(status: str) -> str:
-    return {"queued": "큐에 담김 · 곧 시작", "running": "진행 중…", "held": "보류 중 (PR 머지 후)"}.get(status, "큐에 있음")
+HOLD_LABEL = {   # why a row is held, in a few words (2026-11-23: was always 「PR 머지 후」)
+    "held": "보류 중 (PR 머지 후)",
+    "person": "보류 · 사람 확인 필요",
+    "frozen": "보류 · 콘텐츠 동결 중",
+    "nobody": "보류 · 층 소등 중",
+    "restart": "보류 · 재시작으로 끊김 (지금 시작)",
+}
+
+
+def pending_label(status: str, hold: str = "") -> str:
+    if status == "held":
+        return HOLD_LABEL.get(hold or "held", HOLD_LABEL["held"])
+    return {"queued": "큐에 담김 · 곧 시작", "running": "진행 중…"}.get(status, "큐에 있음")
+
+
+def pending_labels(site_id: str | None = None) -> dict[str, str]:
+    """task id → label of its live queue row (with the real hold reason)."""
+    rank = {STATUS_RUNNING: 3, STATUS_HELD: 2, STATUS_QUEUED: 1}
+    best: dict[str, dict[str, Any]] = {}
+    for x in list_items(site_id, include_done=False):
+        task, st = str(x.get("task") or ""), str(x.get("status") or "")
+        if task and st in rank and rank[st] > rank.get(str((best.get(task) or {}).get("status") or ""), 0):
+            best[task] = x
+    return {t: pending_label(str(x.get("status")), str(x.get("hold") or "")) for t, x in best.items()}
 
 
 def _site_has_live_job(site_id: str) -> bool:
@@ -565,6 +587,17 @@ def _start_call(item: dict[str, Any]) -> bool:
     _mark(item["id"], status=STATUS_RUNNING, started_at=_stamp(), error="")
     threading.Thread(target=_finish_when_idle, args=(item["id"], item.get("site") or sites.current_id()), daemon=True).start()
     return True
+
+
+def requeue(item_id: str) -> None:
+    """Held row → queued again (a person said go)."""
+    with _LOCK:
+        state = _state()
+        for x in state["items"]:
+            if str(x.get("id") or "") == item_id:
+                x["status"], x["error"] = STATUS_QUEUED, ""
+                x.pop("hold", None)
+        _save(state)
 
 
 def _finish_when_idle(item_id: str, site_id: str) -> None:
