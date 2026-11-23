@@ -463,6 +463,13 @@ def _start_task_now(task: str, start_line: str, target: Callable[..., str], *arg
 def start_task_split(task: str, items: list, start_line: Callable[[int], str], target: Callable[..., str], *extra: Any):
     """Start now, or park it in the run queue (see _park). start_line is kept as a "{n}" template."""
     _LAST.code = ""
+    if task in ("search", "polish") and items:
+        from app.work import seo_guard
+        left, changed = seo_guard.edit_budget()
+        if left <= 0:
+            _refused(f"고친 기존 페이지 {changed}개가 아직 PR 전이에요 · 한 PR에 {changed}개까지라 PR이 머지된 뒤 이어서 해요", "held")
+            return []
+        items = list(items)[:left]   # one PR stays inside the SEO guard (pages · titles)
     started = _start_task_split_now(task, items, start_line, target, *extra)
     if not started and items:
         try:

@@ -1159,6 +1159,9 @@ def fix_from_review(work) -> str:
             fix_log.mkdir(parents=True, exist_ok=True)
             (fix_log / f"{path.stem[:60]}.txt").write_text(new, encoding="utf-8")
             body, why = _extract_file(new, original)
+            if not why:
+                from app.work import seo_guard
+                why = seo_guard.page_problem(original, body)
             if why:
                 skipped.append(f"{path.stem[:20]}: {why}")
                 continue

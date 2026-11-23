@@ -196,6 +196,10 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
 
 2026-11-21 추가. 10/27 날짜만 바뀐 페이지·제목 대량 재작성 PR이 머지된 뒤 okonsen·okcaddie 검색 노출이 0 가까이로 떨어진 데 대한 대응.
 
+- **쓸 때 먼저 막기 (2026-11-24):** 머지 때만 막으면 일이 다 끝난 뒤 버려진다.
+  - 시작 때: search·polish는 `seo_guard.edit_budget()`만큼만 맡김 — min(`max_existing_pages`, `max_title_changes`)=3에서 아직 PR 안 된 고친 기존 페이지 수를 뺀 값. 0이면 거부(code `held`) → PR 머지 뒤 큐에서 이어서
+  - 저장 때: `seo_guard.page_problem(old, new)` — 글 언어(ko/ja/latin 글자 수) 바뀜 · AI 메모 · 절반 넘게 짧아짐 · 2.5배 넘게 길어짐이면 저장 안 함. `marketing.polish_one` · `workers.fix_from_review`
+  - 다듬기 지시문은 영어로, 원문 언어를 이름으로 못박음(한국어 지시문이 일본어 글을 한국어로 바꾼 사고, okpy PR #134)
 - `check_diff(git, base, head)` / `check_branch(git, branch)` → 막는 이유 목록. HQ에서 하는 **모든 머지**(자동·버튼) 전에 `merge_pr`가 부름. 막히면 GitHub에서 사람이 직접 머지해야 함
   - DB 파일(`*.sqlite3` · `*.db`) 추가
   - Indexing API 호출(`indexing.googleapis.com` · `urlNotifications`) 추가

@@ -299,9 +299,14 @@ def polish_one(work, rel: str, ask: str) -> str:
     from llm_claude import MODEL_HEAVY, claude_text
 
     front, body = _split_frontmatter(path.read_text(encoding="utf-8"))
+    from app.work import seo_guard
+    lang = {"ja": "Japanese", "ko": "Korean", "latin": "English"}.get(seo_guard.main_script(body), "the same language as the original")
+    # Instruction in English with the language named: a Korean instruction made the model answer in Korean
+    # (2026-11-24 okpy PR #134: a Japanese post came back Korean).
     prompt = (
-        "다음은 블로그 글 본문(Markdown)이다. 원문과 같은 언어로, 사실·코드·링크·이미지·제목 구조는 그대로 두고 "
-        "더 읽기 쉽게 다듬어라. 머리말(frontmatter)은 쓰지 말고 다듬은 본문 Markdown만 출력하라.\n"
+        f"Below is the body (Markdown) of a blog post written in {lang}. Rewrite it to read more easily, "
+        f"IN {lang.upper()} ONLY. Keep facts, numbers, code, links, images and the heading structure. "
+        "Do not add a front matter block, notes or explanations — output only the polished Markdown body.\n"
         + (f"추가 요청: {ask.strip()}\n" if ask.strip() else "")
         + "\n----- 본문 -----\n"
         + body
@@ -309,6 +314,9 @@ def polish_one(work, rel: str, ask: str) -> str:
     new = claude_text(prompt, timeout_sec=900, model=MODEL_HEAVY)
     if not new or len(new) < len(body) * 0.5:
         raise RuntimeError("다듬은 글이 너무 짧아서 저장하지 않았어요")
+    why = seo_guard.page_problem(body, new)
+    if why:
+        raise RuntimeError(f"저장하지 않았어요 · {why}")
     path.write_text(front + new.strip() + "\n", encoding="utf-8")
     record_polish(rel, ask)
     return path.stem
