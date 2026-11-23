@@ -398,15 +398,12 @@ def _run(meeting: Meeting) -> None:
         office.append_event(who=f"{kind} 회의", dept=mode_room(meeting.mode),
                             text=f"제안 {len(ideas)}개 · {result['headline'][:60]}",
                             site="" if len(site_list) > 1 else meeting.site)
-        try:  # 실행 큐: 바로 돌릴 수 있는 제안을 담아 두고, 자리 나면 순서대로 시작
-            from app.work import workqueue
-            with sites.use(meeting.site):
-                n = workqueue.enqueue_meeting(meeting.result_id, meeting.site)
-            if n:
-                office.append_event(who=f"{kind} 회의", dept=mode_room(meeting.mode),
-                                    text=f"실행 큐에 {n}건 담음", site=meeting.site)
-        except Exception:  # noqa: BLE001
-            traceback.print_exc()
+        # 2026-11-23: nothing is queued by itself. The owner approves (or excludes) each idea on 회의 결과.
+        runnable = sum(1 for x in ideas if ((x.get("action") or {}).get("type") or "none") != "none")
+        if runnable:
+            office.append_event(who=f"{kind} 회의", dept=mode_room(meeting.mode),
+                                text=f"실행할 제안 {runnable}개 · 사장님 승인 대기 · 회의 결과에서 담거나 제외해 주세요",
+                                state="wait", site=meeting.site)
         time.sleep(SHOW_SEC)  # let people show their pick on the map before walking back
     except Exception as exc:  # noqa: BLE001
         traceback.print_exc()

@@ -156,8 +156,13 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
 
 - 상태: queued → running → done / failed / held
 - `LOOP_SEC = 60` · `KICK_DELAY = 4.0` (잡 종료 후 다음 시작)
-- held: 열린 PR이 막는 제안(feature · search · polish) → 머지 후 queued (`actions.PR_HOLD_TASKS`)
-- `sweep_zombies`: 재시작으로 끊긴 running → failed(「잡이 끊김 · 다시 담아 주세요」)
+- **입구 하나 (2026-11-23):** `jobs.start_task` / `start_task_split`은 바로 시작하거나, 자리·근무시간·WIP 때문에 거부되면 `jobs._park`가 같은 함수(`module:qualname`)·인자(JSON)를 `source: "call"` 행으로 큐에 담는다(같은 일은 한 번만). 화면 메시지는 「실행 큐에 담았어요 · 자리가 나면 차례로 시작해요」(큐가 멈춰 있으면 그 안내 추가). 잡 안에서 넘긴 일(hand-off)은 `priority: 2`로 먼저. autoship·autodev는 스스로 다시 시도하므로 `jobs.no_queue()` 안에서 부르고 담지 않음. 람다·클로저로 시작하는 일은 담지 못함(그대로 거부)
+- **거부 코드:** `jobs._refused(why, code)` → `request_result()["code"]`. busy·capacity·hours·wip → 대기(queued 유지, 이유 표시) · frozen·nobody·person·held → held · skip → done · never → failed (`workqueue.classify_refusal`; 코드 없는 옛 문구는 낱말로 대신 판단)
+- held 풀기(`_release_held`, 코드별): held(열린 PR) → PR 머지 후 · frozen → 동결 풀린 뒤 · nobody → 층 불 켜진 뒤 · person → `flow.needs_person` 풀린 뒤 · restart → 사람이 「지금 시작」
+- `sweep_zombies`(시작 시·매 루프): 재시작으로 끊긴 running → 글·리서치류(`RETRY_ON_RESTART`)는 1번 queued로 되돌림(회의 제안 `started`도 지움) · 코드·PR 일은 held(`hold: restart`, 「확인 후 지금 시작」)
+- 우선순위: `priority` 높은 것 먼저, 같으면 담긴 순서
+- 회의 제안은 **자동으로 담지 않는다**(사장님 승인). 회의 결과 「승인 · 큐에 담기 (N건)」 · 제안별 「제외」/「되살리기」(`POST /site/<site>/meeting/exclude`, `idea.excluded`). 제외한 제안은 `enqueue_meeting`·`proposal_run`이 건너뜀
+- 한눈에 맨 위 `.qboard`: 「작업 n/6 · 대기 n · 보류 n · 큐 멈춤 n곳」 → 팝업에 진행·대기·보류·멈춘 사이트 (`routes._queue_board`)
 - 검색 백로그 항상 켬 · 회의 액션 일괄 담기 `MAX_BATCH = 15` (`actions.py`, `routes.py`)
 
 ## 8. 자동 진행 (`autoship.py` · `workers.py`)
@@ -255,7 +260,7 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
 - 허용 이메일 `data/boss.json`. **로컬(127.0.0.1)에서는 원클릭 로그인** (Google 불필요). Google OAuth는 `HQ_BOSS_OAUTH=1` 또는 `/login?oauth=1` — redirect URI는 고정 `http://127.0.0.1:<PORT>/oauth/callback` (Cloud Console에 8091 URI 등록 필요; okadmin은 8090만 등록됨)
 - 로그인해도 기능 제한 없음 (PR·머지·배포 포함). 사장 출석이면 쉬는 사원은 전원 자기 자리. **퇴근 시각**에 사장 로그인이면 헤더에 「근무 시간이 끝났어요 · 사장님도 퇴근해 주세요」
 - 도구 점검: `tools/check` · `tools/claude-login` · `tools/restart`
-- Claude 세션 한도(5시간/주간 ≥100%·level=over): `tools.halt_claude_limit` → 전 층 autoship 끔 + 전 사이트 실행 큐 pause · `data/claude_halt.json`. 잡 실패·autoship/workqueue 루프에서도 동일. 한도 중엔 층 메뉴 자동 진행 켜기 거부. 한도 풀린 뒤 사람이 다시 켬
+- Claude 세션 한도(5시간/주간 ≥100%·level=over): `tools.halt_claude_limit` → 전 층 autoship 끔 + 전 사이트 실행 큐 pause · `data/claude_halt.json`. 잡 실패·autoship/workqueue 루프에서도 동일. 한도 중엔 층 메뉴 자동 진행 켜기 거부. halt 때 켜져 있던 층·큐를 `autoship_was_on`·`queues_were_on`에 적고, workqueue 루프가 한도가 풀리면 `tools.resume_after_halt()`로 그대로 다시 켬 · 멈춤/재개 모두 이벤트 한 줄 (2026-11-23)
 - 다시 켜기: 현황 `ss-head`에 「⏸ 실행 큐 멈춤」칩 + 「실행 큐 다시 켜기」버튼(`POST /site/<site>/queue/pause` on=0 → `clear_claude_halt` + `set_paused(False)`). Claude 한도 중이면 버튼 숨김, 소등 층(`office.lights_off`)이면 칩·버튼 모두 숨김 (2026-11-22)
 
 ## 13. 개발 규칙

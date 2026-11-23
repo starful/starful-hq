@@ -672,7 +672,27 @@
     <section class="bottom">
         <div class="bottom-card glance-card">
             <h3>한눈에</h3>
-            <div class="glance-wrap"><table class="glance-t">
+            <div class="glance-wrap">
+            {% set qb = qboard or {} %}
+            <div class="qboard">
+                <button type="button" class="qb-btn" data-gpop="gpop-qboard" title="눌러서 큐 전체 보기">
+                    <span class="qb-slot{{ ' full' if qb.busy >= qb.max }}">작업 {{ qb.busy }}/{{ qb.max }}</span>
+                    <span class="qb-n{{ ' on' if qb.waiting }}">대기 {{ (qb.waiting or []) | length }}</span>
+                    <span class="qb-n{{ ' on' if qb.held }}">보류 {{ (qb.held or []) | length }}</span>
+                    {% if qb.paused %}<span class="qb-n bad">큐 멈춤 {{ qb.paused | length }}곳</span>{% endif %}
+                </button>
+                <template id="gpop-qboard">
+                    <header class="gp-head"><b>실행 큐</b><span class="gp-total">작업 {{ qb.busy }}/{{ qb.max }}</span></header>
+                    <h4>지금 하는 일</h4>
+                    <ul class="qpop-list">{% for r in qb.running %}<li class="qpop-running"><div class="qpop-top"><b>{{ r.who }}</b><span>{{ r.label }}</span><i>{{ '회의' if r.meeting else '진행' }}</i></div><p>{{ r.line }}</p></li>{% else %}<li class="hint">없어요</li>{% endfor %}</ul>
+                    <h4>대기 {{ (qb.waiting or []) | length }}</h4>
+                    <ul class="qpop-list">{% for r in qb.waiting %}<li class="qpop-queued"><div class="qpop-top"><b>{{ r.title }}</b><span>{{ r.site }}</span><i>{{ r.at }}</i></div>{% if r.why %}<p class="qpop-err">{{ r.why }}</p>{% endif %}</li>{% else %}<li class="hint">없어요</li>{% endfor %}</ul>
+                    {% if qb.held %}<h4>보류 {{ qb.held | length }}</h4>
+                    <ul class="qpop-list">{% for r in qb.held %}<li class="qpop-held"><div class="qpop-top"><b>{{ r.title }}</b><span>{{ r.site }}</span><i>{{ r.at }}</i></div>{% if r.why %}<p class="qpop-err">{{ r.why }}</p>{% endif %}</li>{% endfor %}</ul>{% endif %}
+                    {% if qb.paused %}<h4>큐 멈춤</h4><p class="qpop-err">{{ qb.paused | join(' · ') }} — 현황 탭의 「실행 큐 다시 켜기」로 켜요</p>{% endif %}
+                </template>
+            </div>
+            <table class="glance-t">
                 <tr><th></th><th>상태</th><th>콘텐츠</th><th>열린 PR</th><th>마지막 배포</th></tr>
                 {% for g in glance %}
                 {% set pulse = g.pulse or {} %}

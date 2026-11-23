@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import traceback
 from typing import Any, Callable
@@ -261,19 +262,94 @@ CONTENT_TASKS = ("research", "write", "queue", "images")   # need the site's own
 FROZEN_TASKS = ("write", "polish", "search", "fix", "images", "ba_ja")   # change the site's pages: refused while the site is frozen (seo_guard)
 
 
+# Why a start was refused, as a code the run queue can act on (2026-11-23, instead of matching words):
+#   busy      team/kind busy · capacity  all MAX_CONCURRENT slots used · hours  outside office hours
+#   wip       owner's uncommitted files · frozen  site frozen (SEO) · nobody  no one on the team (closed floor)
+#   person    a person has to decide (parked PR) · held  open PR first · skip  nothing to do (done)
+#   never     this site cannot do this work
+WAIT_CODES = ("busy", "capacity", "hours", "wip", "")
+HOLD_CODES = ("frozen", "nobody", "person", "held")
+
+
 def reset_request() -> None:
-    _REQ.tried, _REQ.who, _REQ.why = False, [], ""
+    _REQ.tried, _REQ.who, _REQ.why, _REQ.code = False, [], "", ""
 
 
 def request_result() -> dict[str, Any]:
     """What the last start_task / start_task_split of this web request did (for buttons sent with fetch)."""
     return {"tried": bool(getattr(_REQ, "tried", False)), "who": list(getattr(_REQ, "who", []) or []),
-            "why": str(getattr(_REQ, "why", "") or "")}
+            "why": str(getattr(_REQ, "why", "") or ""), "code": str(getattr(_REQ, "code", "") or "")}
 
 
-def _refused(why: str) -> None:
+_LAST = threading.local()   # last refusal code on this thread, also inside jobs (hand-offs)
+_NOQ = threading.local()    # set while the run queue / autoship starts work: never park it again
+PARK_CODES = ("busy", "capacity", "hours", "wip")
+
+
+def _refused(why: str, code: str = "busy") -> None:
+    _LAST.code, _LAST.why = code, why
     if not getattr(_IN_JOB, "on", False):
-        _REQ.tried, _REQ.why = True, why
+        _REQ.tried, _REQ.why, _REQ.code = True, why, code
+
+
+class no_queue:
+    """`with jobs.no_queue():` — a refused start is not parked (the caller retries by itself)."""
+    def __enter__(self):
+        self.prev = getattr(_NOQ, "on", False)
+        _NOQ.on = True
+
+    def __exit__(self, *exc):
+        _NOQ.on = self.prev
+        return False
+
+
+def _fn_path(fn: Callable[..., Any]) -> str:
+    """'module:qualname' when fn can be found again by name (not a lambda/closure)."""
+    import importlib
+    mod, qual = getattr(fn, "__module__", ""), getattr(fn, "__qualname__", "")
+    if not mod or not qual or "<" in qual:
+        return ""
+    try:
+        obj = importlib.import_module(mod)
+        for part in qual.split("."):
+            obj = getattr(obj, part)
+        return f"{mod}:{qual}" if obj is fn else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _park(task: str, line: str, fn: Callable[..., Any], args: tuple, items: list | None = None) -> bool:
+    """Single entry point (2026-11-23): a start refused only for seats/hours/WIP goes into the run queue
+    instead of being dropped, so 「담기면 안 돌고 · 안 담기면 바로 도는」 split disappears."""
+    if getattr(_NOQ, "on", False) or getattr(_LAST, "code", "") not in PARK_CODES:
+        return False
+    path = _fn_path(fn)
+    try:
+        json.dumps([list(args), items or []])
+    except (TypeError, ValueError):
+        path = ""
+    if not path:
+        return False
+    try:
+        from app.work import workqueue
+        row = workqueue.enqueue({
+            "source": "call", "task": task, "title": line.replace("{n}", str(len(items or [])) if items else "")[:200],
+            "call": {"fn": path, "args": list(args), "items": items, "line": line},
+            "priority": 2 if getattr(_IN_JOB, "on", False) else 0,   # hand-offs of a running chain first
+        })
+    except Exception as exc:  # noqa: BLE001
+        print(f"jobs park: {exc}")
+        return False
+    if not getattr(_IN_JOB, "on", False):
+        why = str(getattr(_REQ, "why", "") or "").split(" · ")[0]
+        _REQ.why = f"{why} · 실행 큐에 담았어요 · 자리가 나면 차례로 시작해요" if row else f"{why} · 이미 실행 큐에 있어요"
+        try:
+            if workqueue.prefs()["queue_paused"] or workqueue._state().get("paused"):
+                _REQ.why += " (지금 큐가 멈춰 있어요 · 「실행 큐 다시 켜기」를 눌러야 시작해요)"
+        except Exception:  # noqa: BLE001
+            pass
+        _REQ.code = "queued"
+    return True
 
 
 _GROUP_WHY = {   # work that goes one at a time per site, and why
@@ -289,6 +365,15 @@ def _busy_why(holder: str, group: str) -> str:
 
 
 def start_task(task: str, start_line: str, target: Callable[..., str], *args: Any, _from: str = "") -> str | None:
+    """Start now, or (refused for seats/hours/WIP) park it in the run queue — see _park."""
+    _LAST.code = ""
+    who = _start_task_now(task, start_line, target, *args, _from=_from)
+    if not who:
+        _park(task, start_line, target, args)
+    return who
+
+
+def _start_task_now(task: str, start_line: str, target: Callable[..., str], *args: Any, _from: str = "") -> str | None:
     """Give a task to the first free person of the team that owns it (preferred people first).
 
     Returns the person id, or None when the whole team is busy or someone already does this kind of
@@ -302,26 +387,26 @@ def start_task(task: str, start_line: str, target: Callable[..., str], *args: An
             print(f"seo_guard frozen check: {exc}")
             rec = None
         if rec:
-            _refused(f"{sites.current().label}는 {rec.get('until')}까지 콘텐츠 동결이에요 ({rec.get('reason')}) · 페이지를 고치는 일은 안 맡아요")
+            _refused(f"{sites.current().label}는 {rec.get('until')}까지 콘텐츠 동결이에요 ({rec.get('reason')}) · 페이지를 고치는 일은 안 맡아요", "frozen")
             return None   # SEO recovery: no page changes on a frozen site (code fixes still allowed)
     if task in CONTENT_TASKS and not sites.current().can_write:
-        _refused(f"{sites.current().label}는 아직 이 일이 연결되지 않았어요")
+        _refused(f"{sites.current().label}는 아직 이 일이 연결되지 않았어요", "never")
         return None   # this site's posts/images are not connected yet: nobody is handed work that can only fail
     if task == "polish" and not sites.current().can_polish:
-        _refused("이 사이트 페이지는 다듬지 않아요")
+        _refused("이 사이트 페이지는 다듬지 않아요", "never")
         return None   # company pages are built from filings, not written: nothing to polish
     if task == "research" and not sites.current().can_research:
-        _refused("CompanyDB는 키워드 리서치 없이 대기열·분석에서 회사를 추가해요")
+        _refused("CompanyDB는 키워드 리서치 없이 대기열·분석에서 회사를 추가해요", "never")
         return None
     if task in WIP_TASKS:
         from app import snapshot
         if snapshot.owner_wip():
-            _refused("사장님이 커밋하지 않은 파일이 있어서 기다려요 · 커밋하거나 정리한 뒤 다시 맡겨 주세요")
+            _refused("사장님이 커밋하지 않은 파일이 있어서 기다려요 · 커밋하거나 정리한 뒤 다시 맡겨 주세요", "wip")
             return None   # the owner's uncommitted files would end up in the PR / on the live site: wait
     from app.office import schedule
     if schedule.enforce_hours() and not schedule.is_work_hours():
         why = schedule.off_reason() or "근무 시간 외"
-        _refused(f"지금은 {why}라서 새 일을 안 맡아요 · 근무 시간에 다시 맡겨 주세요")
+        _refused(f"지금은 {why}라서 새 일을 안 맡아요 · 근무 시간에 다시 맡겨 주세요", "hours")
         return None
     holder = busy_groups().get(office.task_group(task))
     if holder and holder != _from:  # a hand-off from the person doing it (fix → push → review) is fine
@@ -334,7 +419,7 @@ def start_task(task: str, start_line: str, target: Callable[..., str], *args: An
             if task not in office.TASK_TEAM
             else f"{task} 담당 팀이 비어 있어요 · 휴가·스케줄을 확인하세요"
         )
-        _refused(tip)
+        _refused(tip, "nobody")
         return None
     for person in members:
         if start(person, start_line, target, *args, _task=task):
@@ -346,11 +431,25 @@ def start_task(task: str, start_line: str, target: Callable[..., str], *args: An
             if not getattr(_IN_JOB, "on", False):
                 _REQ.tried, _REQ.who = True, [*getattr(_REQ, "who", []), person]
             return person
-    _refused("팀 모두 일하는 중이에요 · 끝나면 다시 맡겨 주세요")
+    _refused("동시 작업 자리가 다 찼어요 · 자리가 나면 시작해요" if at_capacity() else "팀 모두 일하는 중이에요 · 끝나면 다시 맡겨 주세요",
+             "capacity" if at_capacity() else "busy")
     return None
 
 
 def start_task_split(task: str, items: list, start_line: Callable[[int], str], target: Callable[..., str], *extra: Any):
+    """Start now, or park it in the run queue (see _park). start_line is kept as a "{n}" template."""
+    _LAST.code = ""
+    started = _start_task_split_now(task, items, start_line, target, *extra)
+    if not started and items:
+        try:
+            line = start_line("{n}")
+        except Exception:  # noqa: BLE001
+            line = task
+        _park(task, line, target, extra, list(items))
+    return started
+
+
+def _start_task_split_now(task: str, items: list, start_line: Callable[[int], str], target: Callable[..., str], *extra: Any):
     """Split items across the free members of the task's team (see start_team)."""
     if task in FROZEN_TASKS:
         try:
@@ -360,23 +459,24 @@ def start_task_split(task: str, items: list, start_line: Callable[[int], str], t
             print(f"seo_guard frozen check: {exc}")
             rec = None
         if rec:
-            _refused(f"{sites.current().label}는 {rec.get('until')}까지 콘텐츠 동결이에요 ({rec.get('reason')}) · 페이지를 고치는 일은 안 맡아요")
+            _refused(f"{sites.current().label}는 {rec.get('until')}까지 콘텐츠 동결이에요 ({rec.get('reason')}) · 페이지를 고치는 일은 안 맡아요", "frozen")
             return []
     if task in CONTENT_TASKS and not sites.current().can_write:
-        _refused(f"{sites.current().label}는 아직 이 일이 연결되지 않았어요")
+        _refused(f"{sites.current().label}는 아직 이 일이 연결되지 않았어요", "never")
         return []
     if task == "polish" and not sites.current().can_polish:
-        _refused("이 사이트 페이지는 다듬지 않아요")
+        _refused("이 사이트 페이지는 다듬지 않아요", "never")
         return []
     from app.office import schedule
     if schedule.enforce_hours() and not schedule.is_work_hours():
         why = schedule.off_reason() or "근무 시간 외"
-        _refused(f"지금은 {why}라서 새 일을 안 맡아요 · 근무 시간에 다시 맡겨 주세요")
+        _refused(f"지금은 {why}라서 새 일을 안 맡아요 · 근무 시간에 다시 맡겨 주세요", "hours")
         return []
     started = start_team(office.ordered_members(task), items, start_line, target, *extra, task=task)
     if started:
         if not getattr(_IN_JOB, "on", False):
             _REQ.tried, _REQ.who = True, [*getattr(_REQ, "who", []), *[r for r, _ in started]]
     elif items:
-        _refused("팀 모두 일하는 중이거나 같은 일이 진행 중이에요 · 끝나면 다시 맡겨 주세요")
+        _refused("동시 작업 자리가 다 찼어요 · 자리가 나면 시작해요" if at_capacity() else "팀 모두 일하는 중이거나 같은 일이 진행 중이에요 · 끝나면 다시 맡겨 주세요",
+                 "capacity" if at_capacity() else "busy")
     return started

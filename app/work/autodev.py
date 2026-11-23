@@ -123,6 +123,12 @@ def blocked() -> str:
 
 
 def tick() -> str:
+    from app.office import jobs
+    with jobs.no_queue():
+        return _tick()
+
+
+def _tick() -> str:
     if not is_on():
         return "꺼짐"
     why = blocked()

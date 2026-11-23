@@ -5,7 +5,7 @@
             <ol class="ideas ranked">
                 {% for x in (proposal.ideas or [])[:limit] %}
                 {% set act = x.action or {} %}
-                <li>
+                <li class="{{ 'idea-excluded' if x.excluded }}">
                     <span class="rank">{{ x.rank }}</span>
                     <div class="idea-body">
                         <p class="idea-who">{% if staff_map[x.who] %}<span class="face">{{ chibi(staff_map[x.who], face=True) }}</span>{% endif %}<b>{{ x.full or x.name }}</b> <span class="idea-meta">{{ x.position }}</span>{% if proposal.office and x.site %} <span class="idea-site">{{ sico(x.site) }}{{ all_sites[x.site].label if x.site in all_sites else x.site }}</span>{% endif %}</p>
@@ -17,11 +17,23 @@
                     <div class="idea-run">
                         {% set can_run = act.type in ("write", "feature", "search", "polish", "analyze") and (act.type != "write" or cur_site.can_write) %}
                         {% if x.started %}<button class="act ghost small" type="button" disabled title="{{ x.started }}">담김</button>
+                        {% elif x.excluded %}
+                        <span class="idea-excluded-tag">제외됨</span>
+                        <form method="post" action="{{ url_for('site_meeting_exclude') }}">
+                            <input type="hidden" name="pid" value="{{ proposal.id }}"><input type="hidden" name="idx" value="{{ loop.index0 }}"><input type="hidden" name="on" value="0">
+                            <button class="act ghost small" type="submit">되살리기</button>
+                        </form>
                         {% elif can_run %}
                         <form method="post" action="{{ url_for('site_meeting_run') }}" class="idea-form">
                             <input type="hidden" name="pid" value="{{ proposal.id }}"><input type="hidden" name="idx" value="{{ loop.index0 }}">
                             <button class="act small" type="submit">담기</button>
                             <small class="idea-msg" data-msg hidden></small>
+                        </form>
+                        {% endif %}
+                        {% if not x.started and not x.excluded and (act.type or 'none') != 'none' %}
+                        <form method="post" action="{{ url_for('site_meeting_exclude') }}">
+                            <input type="hidden" name="pid" value="{{ proposal.id }}"><input type="hidden" name="idx" value="{{ loop.index0 }}"><input type="hidden" name="on" value="1">
+                            <button class="idea-exclude-btn" type="submit" title="이 제안은 큐에 담지 않아요">제외</button>
                         </form>
                         {% endif %}
                     </div>

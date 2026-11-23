@@ -39,10 +39,16 @@
             {% if p.headline %}<p class="mc-headline">{{ p.headline }}</p>{% endif %}
             {% if p.meeting %}
             <p class="hint">{% if p.office %}{{ cur_office.name }} ({% for sid in p.sites or [] %}{{ sico(sid) }}{% endfor %}) · {% endif %}참석 {{ (p.attendees or []) | length }}명{% if p.host %} · {{ p.host }}{% endif %}{% if p.leader_note %} — “{{ p.leader_note }}”{% endif %}</p>
+            {% set pending = (p.ideas or []) | rejectattr('started') | rejectattr('excluded') | selectattr('action') | list %}
+            {% set pending = pending | rejectattr('action.type', 'equalto', 'none') | list %}
+            {% set n_excl = (p.ideas or []) | selectattr('excluded') | list | length %}
+            {% if pending %}
             <form method="post" action="{{ url_for('site_meeting_top') }}" class="mc-go" data-fetch>
                 <input type="hidden" name="pid" value="{{ p.id }}">
-                <button class="act big" type="submit">큐에 담기</button>
+                <button class="act big" type="submit">승인 · 큐에 담기 ({{ pending | length }}건)</button>
+                <small class="hint">회의가 끝나도 자동으로 시작하지 않아요 · 빼고 싶은 제안은 「제외」를 눌러 주세요{% if n_excl %} · 제외 {{ n_excl }}건{% endif %}</small>
             </form>
+            {% elif n_excl %}<p class="hint">담을 제안이 없어요 · 제외 {{ n_excl }}건</p>{% endif %}
             {{ ideas(p) }}
             {% else %}
             {% for key, label in [("quick_wins", "이번 주 바로 할 일"), ("business", "사업 제안"), ("features", "기능 추가"), ("content", "콘텐츠 전략")] %}
