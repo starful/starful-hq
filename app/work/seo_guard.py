@@ -47,6 +47,60 @@ BINARY_DB = re.compile(r"\.(sqlite3?|db)(-journal)?$", re.I)
 INDEXING_API = re.compile(r"indexing\.googleapis\.com|urlNotifications", re.I)
 
 
+_SCRIPTS = {"ko": re.compile(r"[\uac00-\ud7a3]"), "ja": re.compile(r"[\u3040-\u30ff]"),
+            "latin": re.compile(r"[A-Za-z]")}
+
+
+def main_script(text: str) -> str:
+    """ko / ja / latin by letter count (code blocks and links left out)."""
+    t = re.sub(r"```.*?```|`[^`]*`|\(https?://[^)]*\)|https?://\S+", " ", text or "", flags=re.S)
+    counts = {k: len(rx.findall(t)) for k, rx in _SCRIPTS.items()}
+    if counts["ja"] >= 30:      # Japanese uses kanji + kana; a little kana is enough to say ja
+        return "ja" if counts["ja"] >= counts["ko"] else "ko"
+    return max(counts, key=counts.get) if any(counts.values()) else ""
+
+
+def page_problem(old: str, new: str) -> str:
+    """Why a rewritten page must not be saved ('' = fine). Checked where the page is written,
+    not only at merge: language switched, AI notes, body cut or blown up (2026-11-24)."""
+    if not (new or "").strip():
+        return "빈 글"
+    a, b = main_script(old), main_script(new)
+    if a and b and a != b:
+        return f"글 언어가 바뀌었어요 ({a}→{b})"
+    leaks = [ln for ln in new.splitlines() if LEAK.search(ln.strip()) and not LEAK.search(old)]
+    if leaks:
+        return f"AI 작업 메모가 섞였어요 (「{leaks[0].strip()[:40]}」)"
+    if len(new) < len(old) * 0.5:
+        return "원래 글보다 절반 넘게 짧아졌어요"
+    if len(new) > len(old) * 2.5 and len(old) > 800:
+        return "원래 글보다 2.5배 넘게 길어졌어요"
+    return ""
+
+
+EDIT_TASKS = ("search", "polish")   # jobs that rewrite existing pages (titles too)
+
+
+def edit_budget() -> tuple[int, int]:
+    """(pages this site may still change before the next PR, pages already changed and not in a PR).
+
+    The merge guard allows max_existing_pages per PR and max_title_changes titles; search/polish change
+    titles, so one batch is at most max_title_changes. Started work is cut to this (2026-11-24: a 21-page
+    polish became a PR the guard could never merge).
+    """
+    import subprocess
+    cfg = config()
+    try:
+        out = subprocess.run(["git", "-C", str(sites.current().repo), "status", "--porcelain"],
+                             capture_output=True, text=True, timeout=20).stdout
+    except Exception:  # noqa: BLE001
+        out = ""
+    changed = sum(1 for ln in out.splitlines()
+                  if ln[:2].strip() == "M" and ln[3:].lower().endswith(CONTENT_EXT) and "content/" in ln[3:])
+    cap = min(int(cfg["max_existing_pages"]), int(cfg["max_title_changes"]))
+    return max(cap - changed, 0), changed
+
+
 def config() -> dict[str, Any]:
     try:
         return {**DEFAULTS, **json.loads(CONFIG_PATH.read_text(encoding="utf-8"))}
