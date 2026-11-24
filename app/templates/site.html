@@ -680,9 +680,13 @@
                     <span class="qb-n{{ ' on' if qb.waiting }}">대기 {{ (qb.waiting or []) | length }}</span>
                     <span class="qb-n{{ ' on' if qb.held }}">보류 {{ (qb.held or []) | length }}</span>
                     {% if qb.paused %}<span class="qb-n bad">큐 멈춤 {{ qb.paused | length }}곳</span>{% endif %}
+                    {% set hl = qb.health or {} %}
+                    <span class="qb-n{{ '' if hl.ok else ' bad' }}">{{ '점검 정상' if hl.ok else '점검 ' ~ ((hl['items'] or []) | length) ~ '건' }}</span>
                 </button>
                 <template id="gpop-qboard">
                     <header class="gp-head"><b>실행 큐</b><span class="gp-total">작업 {{ qb.busy }}/{{ qb.max }}</span></header>
+                    {% if qb.health and not qb.health.ok %}<h4>HQ 점검</h4>
+                    <ul class="qpop-list">{% for r in qb.health['items'] %}<li class="qpop-held"><div class="qpop-top"><b>{{ r.label }}</b></div><p class="qpop-err">{{ r.text }}</p></li>{% endfor %}</ul>{% endif %}
                     <h4>지금 하는 일</h4>
                     <ul class="qpop-list">{% for r in qb.running %}<li class="qpop-running"><div class="qpop-top"><b>{{ r.who }}</b><span>{{ r.label }}</span><i>{{ '회의' if r.meeting else '진행' }}</i></div><p>{{ r.line }}</p></li>{% else %}<li class="hint">없어요</li>{% endfor %}</ul>
                     <h4>대기 {{ (qb.waiting or []) | length }}</h4>

@@ -160,6 +160,11 @@ def start(role: str, start_line: str, target: Callable[..., str], *args: Any,
             _set(role, running=False, line=done, state="done")
             work.event(done, state="done")
             try:
+                from app.work import watchdog
+                watchdog.record(site, _task, True)
+            except Exception as wd_exc:  # noqa: BLE001
+                print(f"watchdog record: {wd_exc}")
+            try:
                 from app.work import handoff
                 handoff.clear()
             except Exception as hand_exc:  # noqa: BLE001
@@ -175,6 +180,14 @@ def start(role: str, start_line: str, target: Callable[..., str], *args: Any,
             msg = f"못 했어요. {_bubble_err(exc)}"
             _set(role, running=False, line=msg, state="wait")
             work.event(msg, state="wait")
+            try:   # same failure again and again → stop handing it out for a while (no tokens burned)
+                from app.work import watchdog
+                if not tools_mod.is_claude_limit_error(exc):
+                    note = watchdog.record(site, _task, False, msg)
+                    if note:
+                        work.event(note, state="wait")
+            except Exception as wd_exc:  # noqa: BLE001
+                print(f"watchdog record: {wd_exc}")
             try:   # leave a note in the site repo so no other tool ships the leftovers blind
                 from app.work import handoff
                 handoff.write(msg, task=_task, who=role)
@@ -397,12 +410,29 @@ def start_task(task: str, start_line: str, target: Callable[..., str], *args: An
     return who
 
 
+def _repeat_block(task: str) -> bool:
+    """watchdog: this site's task failed the same way 3× — refuse before any Claude call."""
+    try:
+        from app.work import watchdog
+        rec = watchdog.blocked(sites.current_id(), task)
+    except Exception as exc:  # noqa: BLE001
+        print(f"watchdog blocked: {exc}")
+        return False
+    if rec:
+        _refused(f"같은 이유로 {rec.get('n', 3)}번 실패해서 {str(rec.get('until'))[11:]}까지 쉬어요 · "
+                 f"{str(rec.get('line') or '')[:120]}", "repeat")
+        return True
+    return False
+
+
 def _start_task_now(task: str, start_line: str, target: Callable[..., str], *args: Any, _from: str = "") -> str | None:
     """Give a task to the first free person of the team that owns it (preferred people first).
 
     Returns the person id, or None when the whole team is busy or someone already does this kind of
     work (e.g. a second 소스정리 while one is running).
     """
+    if _repeat_block(task):
+        return None
     if task in FROZEN_TASKS:
         try:
             from app.work import seo_guard
@@ -482,6 +512,8 @@ def start_task_split(task: str, items: list, start_line: Callable[[int], str], t
 
 def _start_task_split_now(task: str, items: list, start_line: Callable[[int], str], target: Callable[..., str], *extra: Any):
     """Split items across the free members of the task's team (see start_team)."""
+    if _repeat_block(task):
+        return []
     if task in FROZEN_TASKS:
         try:
             from app.work import seo_guard

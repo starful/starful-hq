@@ -325,6 +325,11 @@ def _loop() -> None:
         print(f"handoff scan: {exc}")
     while True:
         try:
+            from app.work import watchdog
+            watchdog.beat("autoship")
+        except Exception:  # noqa: BLE001
+            pass
+        try:
             from app.work import seo_guard
             for line in seo_guard.watch_traffic():
                 print(f"seo_guard alert {line}")
@@ -357,3 +362,5 @@ def start_loop() -> None:
         return
     _STARTED = True
     threading.Thread(target=_loop, name="autoship", daemon=True).start()
+    from app.work import watchdog
+    watchdog.register("autoship", _loop)

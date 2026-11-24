@@ -136,8 +136,9 @@ def test_zombie_running_shows_stuck_then_sweep_clears(tmp_path, monkeypatch):
         assert pulse["label"] == "멈춤"
         assert pulse["entries"] and pulse["entries"][0]["title"]
         assert workqueue.sweep_zombies("okpy") == 1
-        assert workqueue.site_pulse("okpy")["kind"] == "idle"
-        assert workqueue.list_items("okpy")[0]["status"] == workqueue.STATUS_FAILED
+        assert workqueue.site_pulse("okpy")["kind"] == "held"   # code/PR work waits for a person after a restart
+        row = workqueue.list_items("okpy")[0]
+        assert row["status"] == workqueue.STATUS_HELD and row["hold"] == "restart"
 
 
 def test_start_now_starts_a_queued_task(tmp_path, monkeypatch):
