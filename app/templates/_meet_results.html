@@ -74,3 +74,34 @@
     <p class="hint">아직 회의 결과가 없어요. 현황에서 회의를 열면 여기에 쌓여요.</p>
     {% endif %}
 </section>
+<script>
+/* 제외·되살리기: 새로고침 없이 그 회의 카드만 다시 그린다 (2026-11-24) */
+(function () {
+    if (window.__ideaExBound) return;
+    window.__ideaExBound = true;
+    document.addEventListener("submit", async function (ev) {
+        const form = ev.target.closest && ev.target.closest("form.idea-ex-form");
+        if (!form) return;
+        ev.preventDefault();
+        const card = form.closest("article.meet-card");
+        const btn = form.querySelector("button");
+        if (btn) btn.disabled = true;
+        try {
+            const r = await fetch(form.action, {method: "POST", body: new FormData(form),
+                headers: {"X-Requested-With": "fetch", "Accept": "application/json"}});
+            const out = await r.json().catch(() => ({}));
+            if (out.ok === false) {
+                if (btn) { btn.disabled = false; btn.title = out.msg || "바꾸지 못했어요"; btn.textContent = "다시 시도"; }
+                return;
+            }
+            if (card && card.id) {
+                const html = await (await fetch(location.href, {headers: {"X-Requested-With": "fetch-page"}})).text();
+                const fresh = new DOMParser().parseFromString(html, "text/html").getElementById(card.id);
+                if (fresh) { card.replaceWith(fresh); return; }
+            }
+            location.reload();
+        } catch (e) { location.reload(); }
+    });
+})();
+</script>
+
