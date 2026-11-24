@@ -19,7 +19,7 @@
                         {% if x.started %}<button class="act ghost small" type="button" disabled title="{{ x.started }}">담김</button>
                         {% elif x.excluded %}
                         <span class="idea-excluded-tag">제외됨</span>
-                        <form method="post" action="{{ url_for('site_meeting_exclude') }}">
+                        <form method="post" action="{{ url_for('site_meeting_exclude') }}" class="idea-ex-form">
                             <input type="hidden" name="pid" value="{{ proposal.id }}"><input type="hidden" name="idx" value="{{ loop.index0 }}"><input type="hidden" name="on" value="0">
                             <button class="act ghost small" type="submit">되살리기</button>
                         </form>
@@ -31,7 +31,7 @@
                         </form>
                         {% endif %}
                         {% if not x.started and not x.excluded and (act.type or 'none') != 'none' %}
-                        <form method="post" action="{{ url_for('site_meeting_exclude') }}">
+                        <form method="post" action="{{ url_for('site_meeting_exclude') }}" class="idea-ex-form">
                             <input type="hidden" name="pid" value="{{ proposal.id }}"><input type="hidden" name="idx" value="{{ loop.index0 }}"><input type="hidden" name="on" value="1">
                             <button class="idea-exclude-btn" type="submit" title="이 제안은 큐에 담지 않아요">제외</button>
                         </form>
