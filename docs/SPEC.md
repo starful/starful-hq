@@ -140,6 +140,7 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
 - 제휴 메일 수집: 층 메뉴(자동 진행 아래)「N층 메일 수집 맡기기」만 층 일괄. 현황은「메일 목록 보기」·팝업「이 사이트만 수집」. 태스크 `partner_collect_floor` / `partner_collect`. 흐름: 콘텐츠 URL → Places → http URL만 수집. 사이트 단독 최대 20 · 층 일괄은 Places 예산 24를 사이트 수로 나눔. 사이트: jpcampus·krcampus·okonsen·okcaddie·jpfun·krcare
 - `TASK_GROUP` (사이트당 한 명): refactor 그룹(refactor·refactor_front·refactor_back·optimize) · pr 그룹(issue·review·fix·fix_code·push·merge) · deploy 그룹
 - `ITEM_TASKS = (write, search, polish)` · `OPTIONAL_TASKS = (write, search)` · `AWAY_TASKS = (research, review, propose, analyze)` → 프리석/핫데스크
+- 코드 반영 재시작(`app/__main__.py`, 2026-11-24): werkzeug 리로더 대신 `_reload_when_idle` — `app/**/*.py`·okadmin `*.py`가 바뀌면 진행 중인 잡이 0일 때만 `os.execv`로 다시 켬(기다리는 동안 이벤트 한 줄). 전에는 저장 즉시 재시작돼 진행 중인 잡이 끊겼음
 - `jobs.py`: 사원 1명당 잡 1개 · 동시 작업 상한 `jobs.max_concurrent()` = 열린 층(B1 TF 제외) 팀원 수 합계(기획·마케·디자인·개발, 지금 16) · 환경변수 `NEXT_MAX_JOBS`가 있으면 그 값 (2026-11-24, 전에는 고정 6) · 저장소별 git 잠금(`work.git_turn()`)
   - `WIP_TASKS = (issue, push, deploy, optimize, refactor, refactor_front, refactor_back)` → `snapshot.owner_wip()`가 있으면 시작 안 함
   - `CONTENT_TASKS = (research, write, images)` → kit의 `can_write` 필요
@@ -161,6 +162,7 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
 - held 풀기(`_release_held`, 코드별): PR을 기다리던 review·fix·fix_code·push는 PR이 머지·종료되면 done · held(열린 PR) → PR 머지 후 · frozen → 동결 풀린 뒤 · nobody → 층 불 켜진 뒤 · person → `flow.needs_person` 풀린 뒤 · restart → 사람이 「지금 시작」
 - `sweep_zombies`(시작 시·매 루프): 재시작으로 끊긴 running → 글·리서치류(`RETRY_ON_RESTART`)는 1번 queued로 되돌림(회의 제안 `started`도 지움) · 코드·PR 일은 held(`hold: restart`, 「확인 후 지금 시작」)
 - 우선순위: `priority` 높은 것 먼저, 같으면 담긴 순서
+- 결과 기록(`_finish_when_idle`, 2026-11-24): 그 행이 시작한 사원(들)의 잡만 지켜봄(최대 4시간). 잘 끝나면 done · 「아직 올리지 않은 코드/열린 PR」로 멈췄으면 held(`hold: dirty`, 열린 PR 없고 코드 변경도 없으면 자동 queued) · 그 밖의 실패는 failed(회의 제안은 다시 승인 가능하게 `started` 지움). 전에는 사이트가 한가해지면 실패여도 done, 15분 지나면 진행 중이어도 done이었음
 - 회의 제안은 **자동으로 담지 않는다**(사장님 승인). 회의 결과 「승인 · 큐에 담기 (N건)」 · 제안별 「제외」/「되살리기」(`POST /site/<site>/meeting/exclude`, `idea.excluded`). 제외한 제안은 `enqueue_meeting`·`proposal_run`이 건너뜀
 - 한눈에 맨 위 `.qboard`: 「작업 n/상한 · 대기 n · 보류 n · 큐 멈춤 n곳」 → 팝업에 진행·대기·보류·멈춘 사이트 (`routes._queue_board`)
 - 검색 백로그 항상 켬 · 회의 액션 일괄 담기 `MAX_BATCH = 15` (`actions.py`, `routes.py`)
