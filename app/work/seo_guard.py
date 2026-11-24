@@ -78,6 +78,78 @@ def page_problem(old: str, new: str) -> str:
     return ""
 
 
+_LANG_SUFFIX = re.compile(r"_(ja|jp|ko|kr|en|zh|zh_tw|zh_cn|tw|cn)\.(md|markdown|mdx)$", re.I)
+
+
+def lang_problem(path: str, text: str) -> str:
+    """A page whose body is not in the language it says it is (front matter `lang:` or a _xx file suffix)."""
+    lang = (_front(text).get("lang") or "").lower()
+    if not lang:
+        m = _LANG_SUFFIX.search(path)
+        lang = m.group(1).lower() if m else ""
+    if not lang:
+        return ""
+    body = text[text.find("\n---", 3) + 4:] if text.startswith("---") else text
+    t = re.sub(r"```.*?```|`[^`]*`|\(https?://[^)]*\)|https?://\S+", " ", body, flags=re.S)
+    t = re.sub(r"[(（][^)）\n]{0,80}[)）]", " ", t)   # names in brackets: 「Clinic (강남 피부과)」 is still English
+    han = len(re.findall(r"[\u4e00-\u9fff]", t))
+    ko = len(_SCRIPTS["ko"].findall(t))
+    kana = len(_SCRIPTS["ja"].findall(t))
+    latin = len(_SCRIPTS["latin"].findall(t))
+    names = {"ko": "한국어", "ja": "일본어", "latin": "영어"}
+    want = {"ja": "ja", "jp": "ja", "ko": "ko", "kr": "ko", "en": "latin"}.get(lang, "zh" if lang.startswith(("zh", "tw", "cn")) else "")
+    # A page "is" another language only when that language clearly outweighs its own
+    # (en guides quote Japanese names, ja pages carry English terms).
+    if want == "latin" and max(ko, kana) * 3 > latin and max(ko, kana) > 60:
+        return f"en 페이지인데 본문이 {names['ko' if ko > kana else 'ja']}예요"
+    if want == "ja" and (ko > kana and ko > 60 or (kana < 30 and latin > 2000)):
+        return f"ja 페이지인데 본문이 {names['ko'] if ko > kana else names['latin']}예요"
+    if want == "ko" and (kana > ko and kana > 60 or (ko < 30 and latin > 2000)):
+        return f"ko 페이지인데 본문이 {names['ja'] if kana > ko else names['latin']}예요"
+    if want == "zh" and ko > han and ko > 60:
+        return "중국어 페이지인데 본문이 한국어예요"
+    return ""
+
+
+def screen_worktree(repo) -> list[tuple[str, str]]:
+    """Before a PR is opened: take out every changed page that went wrong, whoever wrote it.
+
+    Modified page → put back as it was (git checkout). New page → moved to data/quarantine/<site>/.
+    Returns (path, why) for what was taken out. (2026-11-24: Korean rewrites kept reaching review.)
+    """
+    import shutil
+    import subprocess
+
+    def git(*a):
+        return subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True, timeout=60)
+
+    out: list[tuple[str, str]] = []
+    for ln in git("status", "--porcelain", "--untracked-files=all").stdout.splitlines():
+        code, path = ln[:2], ln[3:].strip().strip('"')
+        if not path.lower().endswith(CONTENT_EXT) or "content/" not in path:
+            continue
+        full = Path(repo) / path
+        try:
+            new = full.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if code.strip() == "M":
+            old = git("show", f"HEAD:{path}").stdout
+            why = page_problem(_body(old) if old else "", _body(new)) if old else ""
+            why = why or lang_problem(path, new)
+            if why:
+                git("checkout", "--", path)
+                out.append((path, why))
+        elif code.strip() in ("??", "A"):
+            why = lang_problem(path, new) or ("AI 작업 메모가 섞였어요" if any(LEAK.search(l.strip()) for l in new.splitlines()) else "")
+            if why:
+                q = sites.ROOT / "data" / "quarantine" / sites.current_id() / path
+                q.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(full), str(q))
+                out.append((path, why))
+    return out
+
+
 EDIT_TASKS = ("search", "polish")   # jobs that rewrite existing pages (titles too)
 
 

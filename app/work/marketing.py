@@ -27,6 +27,7 @@ ANALYSIS_PATH = sites.data("analysis.json")          # latest
 ANALYSIS_DIR = sites.data("analysis")                # every run: <id>.json + <id>.md
 PRIOR_DIR = ROOT / "data" / "traffic_prior"          # GA4 previous-period daily rows (HQ local)
 POLISH_MAX_TRIES = 4
+POLISH_COOLDOWN_DAYS = 30   # a polished post is not handed out again for a month (2026-11-24: one page 4× in a week)
 POLISH_LIST_LIMIT = 150
 _POLISH_LOCK = threading.Lock()
 _PRIOR_LOCK = threading.Lock()
@@ -104,6 +105,17 @@ def post_index() -> dict[str, dict[str, Any]]:
 def polish_counts() -> dict[str, int]:
     data = _read(POLISH_PATH)
     return {rel: len(v) for rel, v in data.items() if isinstance(v, list)}
+
+
+def polished_recently(rel: str, days: int = POLISH_COOLDOWN_DAYS) -> str:
+    """Date of the last polish when it is within `days` ('' = free to polish)."""
+    from datetime import timedelta
+    hist = _read(POLISH_PATH).get(rel) or []
+    last = max((str(h.get("at") or "") for h in hist if isinstance(h, dict)), default="")
+    if not last:
+        return ""
+    limit = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M")
+    return last[:10] if last >= limit else ""
 
 
 def record_polish(rel: str, ask: str = "") -> None:
@@ -260,7 +272,7 @@ def polish_candidates(site: dict[str, Any], analysis: dict[str, Any] | None = No
             return
         seen.add(rel)
         n = counts.get(rel, 0)
-        if n >= POLISH_MAX_TRIES:
+        if n >= POLISH_MAX_TRIES or polished_recently(rel):
             skipped += 1
             return
         info = by_rel[rel]
@@ -295,6 +307,9 @@ def polish_one(work, rel: str, ask: str) -> str:
     path = snapshot.safe_post(rel)
     if path is None:
         raise RuntimeError("글을 찾지 못했어요")
+    last = polished_recently(rel)
+    if last:
+        raise RuntimeError(f"{last}에 다듬은 글이라 {POLISH_COOLDOWN_DAYS}일 동안은 다시 다듬지 않아요")
     _okadmin_import()
     from llm_claude import MODEL_HEAVY, claude_text
 
