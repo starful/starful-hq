@@ -8,7 +8,11 @@ import threading
 import time
 from pathlib import Path
 
-from app.routes import app
+# The background loops (queue · autoship · autodev · affsync) start in app.routes only when this is set:
+# it used to come from the werkzeug reloader, which HQ no longer uses (see _reload_when_idle).
+os.environ["WERKZEUG_RUN_MAIN"] = "true"
+
+from app.routes import app  # noqa: E402
 
 PORT = int(os.environ.get("PORT", "8091"))
 WATCH = [Path(__file__).resolve().parent, Path(os.environ.get("WORK_ROOT", "/opt/work")) / "okadmin"]
