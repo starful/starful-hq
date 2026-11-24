@@ -331,7 +331,8 @@ def _queue_board() -> dict:
                     waiting.append(row)
                 elif x.get("status") == workqueue.STATUS_HELD:
                     held.append(row)
-    return {"max": jobs.max_concurrent(), "busy": heavy, "running": running,
+    from app.work import watchdog
+    return {"health": watchdog.status(), "max": jobs.max_concurrent(), "busy": heavy, "running": running,
             "waiting": waiting, "held": held, "paused": paused}
 
 
@@ -1303,6 +1304,8 @@ def site_run(task: str):
     if task not in waiting and task not in ("write", "search", "issue", "review", "deploy"):
         msg = "지금 할 일이 없어요"
         return jsonify({"ok": False, "msg": msg}) if _fetch() else redirect(url_for("site_status"))
+    from app.work import watchdog
+    watchdog.unblock(sites.current_id(), task)   # a person pressed it: one more try
     held = next((x for x in workqueue.list_items(include_done=False)
                  if x.get("task") == task and x.get("status") == workqueue.STATUS_HELD), None)
     if held and held.get("hold") in ("person", "restart"):
@@ -1667,3 +1670,5 @@ if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or os.environ.get("NEXT_AUTODEV
     from app.work import workqueue
     autoship.start_loop()  # 자동 진행: PR → review → merge → deploy
     workqueue.start_loop()  # 실행 큐: 회의·할 일 순서대로 시작
+    from app.work import watchdog
+    watchdog.start_loop()   # 자가 점검: 멈춘 루프 다시 띄우기 · 같은 실패 반복 차단

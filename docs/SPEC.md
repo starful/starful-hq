@@ -167,6 +167,14 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
 - 한눈에 맨 위 `.qboard`: 「작업 n/상한 · 대기 n · 보류 n · 큐 멈춤 n곳」 → 팝업에 진행·대기·보류·멈춘 사이트 (`routes._queue_board`)
 - 검색 백로그 항상 켬 · 회의 액션 일괄 담기 `MAX_BATCH = 15` (`actions.py`, `routes.py`)
 
+## 7-1. 자가 점검 (`app/work/watchdog.py`, 2026-11-25)
+
+HQ가 사람 없이도 멈추지 않고, 같은 실패에 토큰을 태우지 않게.
+- 루프 생존: 실행 큐·자동 진행 루프가 매 바퀴 `watchdog.beat()`. 10분(`STALE_SEC`) 넘게 소식이 없으면 새로 띄우고 이벤트 한 줄
+- 같은 실패 반복 차단: `jobs.run` 끝에 `watchdog.record(site, task, ok, line)`. 같은 사이트·같은 일이 같은 이유(경로·숫자 뺀 문장)로 24시간 안에 3번 실패하면 6시간 `blocked` → `jobs._repeat_block`이 Claude를 부르기 전에 거부(code `repeat`, 큐에선 대기). 한 번 성공하면 풀림 · 현황 「▶」(site_run)을 사람이 누르면 `unblock`. Claude 한도 실패는 세지 않음
+- 한눈에 맨 위 줄 끝 「점검 정상」/「점검 n건」 → 팝업 맨 위 「HQ 점검」 목록 (`watchdog.status()`)
+- `__main__`이 `WERKZEUG_RUN_MAIN=true`를 직접 넣어 백그라운드 루프가 리로더 없이도 시작됨(#25 뒤 루프가 안 돌던 사고)
+
 ## 8. 자동 진행 (`autoship.py` · `workers.py`)
 
 - `LOOP_SEC = 180` · `KICK_DELAY = 4.0`. 꺼진 층·동결 사이트(`seo_guard.frozen`)는 스킵. 층 설정이 없으면 꺼짐(2026-11-21부터)

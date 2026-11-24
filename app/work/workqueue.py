@@ -787,6 +787,11 @@ def _loop() -> None:
     time.sleep(45)
     while True:
         try:
+            from app.work import watchdog
+            watchdog.beat("workqueue")
+        except Exception:  # noqa: BLE001
+            pass
+        try:
             from app import tools as tools_mod
             tools_mod.resume_after_halt()
         except Exception as exc:  # noqa: BLE001
@@ -813,3 +818,5 @@ def start_loop() -> None:
         except Exception as exc:  # noqa: BLE001
             print(f"workqueue sweep {s.id}: {exc}")
     threading.Thread(target=_loop, name="workqueue", daemon=True).start()
+    from app.work import watchdog
+    watchdog.register("workqueue", _loop)
