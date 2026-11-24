@@ -91,6 +91,8 @@ def lang_problem(path: str, text: str) -> str:
         return ""
     body = text[text.find("\n---", 3) + 4:] if text.startswith("---") else text
     t = re.sub(r"```.*?```|`[^`]*`|\(https?://[^)]*\)|https?://\S+", " ", body, flags=re.S)
+    t = re.sub(r"[(（][^)）\n]{0,80}[)）]", " ", t)   # names in brackets: 「Clinic (강남 피부과)」 is still English
+    han = len(re.findall(r"[\u4e00-\u9fff]", t))
     ko = len(_SCRIPTS["ko"].findall(t))
     kana = len(_SCRIPTS["ja"].findall(t))
     latin = len(_SCRIPTS["latin"].findall(t))
@@ -98,13 +100,13 @@ def lang_problem(path: str, text: str) -> str:
     want = {"ja": "ja", "jp": "ja", "ko": "ko", "kr": "ko", "en": "latin"}.get(lang, "zh" if lang.startswith(("zh", "tw", "cn")) else "")
     # A page "is" another language only when that language clearly outweighs its own
     # (en guides quote Japanese names, ja pages carry English terms).
-    if want == "latin" and max(ko, kana) * 3 > latin and max(ko, kana) > 200:
+    if want == "latin" and max(ko, kana) * 3 > latin and max(ko, kana) > 60:
         return f"en 페이지인데 본문이 {names['ko' if ko > kana else 'ja']}예요"
-    if want == "ja" and (ko > kana and ko > 100 or (kana < 30 and latin > 2000)):
+    if want == "ja" and (ko > kana and ko > 60 or (kana < 30 and latin > 2000)):
         return f"ja 페이지인데 본문이 {names['ko'] if ko > kana else names['latin']}예요"
-    if want == "ko" and (kana > ko and kana > 100 or (ko < 30 and latin > 2000)):
+    if want == "ko" and (kana > ko and kana > 60 or (ko < 30 and latin > 2000)):
         return f"ko 페이지인데 본문이 {names['ja'] if kana > ko else names['latin']}예요"
-    if want == "zh" and ko > 100 and ko * 2 > len(t):
+    if want == "zh" and ko > han and ko > 60:
         return "중국어 페이지인데 본문이 한국어예요"
     return ""
 
