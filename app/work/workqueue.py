@@ -190,6 +190,7 @@ HOLD_LABEL = {   # why a row is held, in a few words (2026-11-23: was always 「
     "frozen": "보류 · 콘텐츠 동결 중",
     "nobody": "보류 · 층 소등 중",
     "restart": "보류 · 재시작으로 끊김 (지금 시작)",
+    "dirty": "보류 · 먼저 올릴 코드가 있어요 (PR 뒤 자동)",
 }
 
 
@@ -456,6 +457,18 @@ def _mark(item_id: str, **changes: Any) -> None:
         _save(state)
 
 
+def _code_dirty() -> bool:
+    """Uncommitted code files in the current site repo (what makes feature jobs refuse to start)."""
+    import subprocess
+    try:
+        out = subprocess.run(["git", "-C", str(sites.current().repo), "status", "--porcelain"],
+                             capture_output=True, text=True, timeout=20).stdout
+    except Exception:  # noqa: BLE001
+        return False
+    return any(ln[3:].strip().endswith((".py", ".js", ".ts", ".html", ".css", ".json", ".yaml", ".yml"))
+               for ln in out.splitlines() if not ln.startswith("??"))
+
+
 def _release_held() -> None:
     """Open-PR holds (feature/search/polish) → queued again when the PR is gone/merged."""
     from app import office
@@ -479,6 +492,7 @@ def _release_held() -> None:
                 "nobody": sites.current().office not in staffing.closed_offices(),
                 "person": not flow.get("needs_person") or not open_pr,   # PR merged/closed: nothing left to decide
                 "restart": False,   # a person presses 「지금 시작」
+                "dirty": not open_pr and not _code_dirty(),
             }.get(code, task in actions.PR_HOLD_TASKS and not open_pr)
             if task in ("review", "fix", "fix_code", "push") and not open_pr:
                 x["status"], x["finished_at"] = STATUS_DONE, _stamp()   # the PR it waited on is gone
@@ -537,7 +551,7 @@ def _start_item(item: dict[str, Any]) -> bool:
             _mark(item["id"], status=STATUS_RUNNING, started_at=_stamp(), label=what, error="")
             # job runs async; mark done when? We mark running now; a short follow-up marks done
             # after kick delay if the idea already has started (job accepted).
-            threading.Thread(target=_finish_when_idle, args=(item["id"], sid), daemon=True).start()
+            threading.Thread(target=_finish_when_idle, args=(item["id"], sid, [who]), daemon=True).start()
             return True
         if source == "task":
             from app.work import actions
@@ -562,7 +576,8 @@ def _start_item(item: dict[str, Any]) -> bool:
                 _after_refusal(item, res.get("why") or "", res.get("code") or "")
                 return False
             _mark(item["id"], status=STATUS_RUNNING, started_at=_stamp(), error="")
-            threading.Thread(target=_finish_when_idle, args=(item["id"], sid), daemon=True).start()
+            whos = [who] if isinstance(who, str) else [r for r, *_ in who] if isinstance(who, list) else []
+            threading.Thread(target=_finish_when_idle, args=(item["id"], sid, whos), daemon=True).start()
             return True
     return False
 
@@ -583,7 +598,7 @@ def _start_call(item: dict[str, Any]) -> bool:
     task, line, args = str(item.get("task") or ""), str(c.get("line") or item.get("title") or "시작"), list(c.get("args") or [])
     if c.get("items"):
         started = jobs.start_task_split(task, list(c["items"]), lambda n: line.replace("{n}", str(n)), fn, *args)
-        who = bool(started)
+        who = [r for r, *_ in started] if started else None
     else:
         who = jobs.start_task(task, line, fn, *args)
     if not who:
@@ -591,7 +606,8 @@ def _start_call(item: dict[str, Any]) -> bool:
         _after_refusal(item, res.get("why") or "", res.get("code") or "")
         return False
     _mark(item["id"], status=STATUS_RUNNING, started_at=_stamp(), error="")
-    threading.Thread(target=_finish_when_idle, args=(item["id"], item.get("site") or sites.current_id()), daemon=True).start()
+    whos = [who] if isinstance(who, str) else list(who or [])
+    threading.Thread(target=_finish_when_idle, args=(item["id"], item.get("site") or sites.current_id(), whos), daemon=True).start()
     return True
 
 
@@ -606,24 +622,52 @@ def requeue(item_id: str) -> None:
         _save(state)
 
 
-def _finish_when_idle(item_id: str, site_id: str) -> None:
-    """After the started job(s) for this site settle, mark the queue row done."""
+_DIRTY_WORDS = ("아직 올리지 않은 코드 변경", "커밋하지 않은 작업 파일", "열린 PR #")
+
+
+def _finish_when_idle(item_id: str, site_id: str, whos: list[str] | None = None) -> None:
+    """Wait for the job(s) this row started, then record how they ended (2026-11-24).
+
+    Before: the row became 「done」 as soon as the site was idle, even when the job failed at once
+    (「아직 올리지 않은 코드 변경이 있어요」) — and after 15 min even while a long feature job still ran.
+    Now: watch the people it started; done only if they finished well. A job that stopped because of
+    unshipped code / an open PR goes back to waiting (hold 'dirty', released once that is shipped);
+    any other failure → failed (meeting idea reopened so it can be approved again).
+    """
     from app.office import jobs
     time.sleep(2)
-    for _ in range(180):  # up to ~15 min
-        busy = False
+    with jobs._LOCK:   # a team name ("mkt") instead of a person → watch the whole site as before
+        whos = [w for w in (whos or []) if isinstance(w, str) and w in jobs.JOBS]
+    for _ in range(4 * 720):  # up to ~4 h
         with jobs._LOCK:
-            for j in jobs.JOBS.values():
-                if j.get("running") and (j.get("site") or sites.DEFAULT_SITE) == site_id \
-                        and not str(j.get("task") or "").startswith("meeting"):
-                    busy = True
-                    break
+            if whos:
+                busy = any((jobs.JOBS.get(w) or {}).get("running") for w in whos)
+            else:
+                busy = any(j.get("running") and (j.get("site") or sites.DEFAULT_SITE) == site_id
+                           and not str(j.get("task") or "").startswith("meeting") for j in jobs.JOBS.values())
+            ends = [dict(jobs.JOBS.get(w) or {}) for w in whos]
         if not busy:
-            _mark(item_id, status=STATUS_DONE, finished_at=_stamp())
-            kick(site_id)
-            return
+            break
         time.sleep(5)
-    _mark(item_id, status=STATUS_DONE, finished_at=_stamp(), error="시간 초과 · 잡 상태를 확인하세요")
+    else:
+        with sites.use(site_id):
+            _mark(item_id, error="4시간 넘게 진행 중 · 잡 상태를 확인하세요")
+        return
+    failed = [e for e in ends if e.get("state") == "wait"]
+    if whos and failed and len(failed) == len(ends):
+        line = str(failed[0].get("line") or "실패")[:200]
+        with sites.use(site_id):
+            row = next((x for x in list_items(site_id, include_done=True) if x.get("id") == item_id), {})
+            _reopen_idea(row)
+            if any(w in line for w in _DIRTY_WORDS):
+                _mark(item_id, status=STATUS_HELD, hold="dirty", error=line)
+            else:
+                _mark(item_id, status=STATUS_FAILED, finished_at=_stamp(), error=line)
+        kick(site_id)
+        return
+    with sites.use(site_id):
+        _mark(item_id, status=STATUS_DONE, finished_at=_stamp())
+    kick(site_id)
 
 
 def next_item() -> bool:
