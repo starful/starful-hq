@@ -694,6 +694,16 @@ def issue_pr(work, hint: str) -> str:
     issue_no = (flow.get("issue") or {}).get("number") if open_pr else None
     with work.git_turn():
         snapshot.revert_generated()   # .pyc from running tests / scripts never go into a PR
+        # Last stop before review tokens are spent: pages in the wrong language / with AI notes go out
+        from app.work import seo_guard
+        bad = seo_guard.screen_worktree(OKPY)
+        if bad:
+            work.event(f"이상한 글 {len(bad)}개를 PR에서 뺐어요 ({bad[0][0].split('/')[-1]}: {bad[0][1]} 등) · "
+                       "고친 글은 되돌리고 새 글은 data/quarantine에 옮겼어요", state="wait")
+            import subprocess
+            left = subprocess.run(["git", "-C", str(OKPY), "status", "--porcelain"], capture_output=True, text=True).stdout.strip()
+            if not left:
+                return f"PR에 넣을 글이 없어요 · 이상한 글 {len(bad)}개를 뺐어요 ({bad[0][1]})"
         # PR already open: add the new changes to it instead of opening a second issue.
         work.say("열린 PR에 바뀐 내용을 더하는 중" if open_pr else "바뀐 내용을 읽고 이슈와 PR을 쓰는 중")
         result = ship_prepare(

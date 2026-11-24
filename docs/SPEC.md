@@ -200,6 +200,7 @@ CompanyDB는 `can_research: false` · 직접 입력 없음. 기획 상세 **회�
   - 시작 때: search·polish는 `seo_guard.edit_budget()`만큼만 맡김 — min(`max_existing_pages`, `max_title_changes`)=3에서 아직 PR 안 된 고친 기존 페이지 수를 뺀 값. 0이면 거부(code `held`) → PR 머지 뒤 큐에서 이어서
   - 저장 때: `seo_guard.page_problem(old, new)` — 글 언어(ko/ja/latin 글자 수) 바뀜 · AI 메모 · 절반 넘게 짧아짐 · 2.5배 넘게 길어짐이면 저장 안 함. `marketing.polish_one` · `workers.fix_from_review`
   - 다듬기 지시문은 영어로, 원문 언어를 이름으로 못박음(한국어 지시문이 일본어 글을 한국어로 바꾼 사고, okpy PR #134)
+  - PR 만들기 직전(`workers.issue_pr` → `seo_guard.screen_worktree`): 누가 썼든 바뀐·새 글을 다시 검사. 고친 글이 `page_problem`·`lang_problem`(머리말 `lang:` 또는 파일 끝 `_en/_ja/_ko/_zh…`과 본문 언어가 다름)에 걸리면 `git checkout`으로 되돌리고, 새 글은 `data/quarantine/<site>/`로 옮김 → 리뷰 토큰을 쓰기 전에 빠짐 (2026-11-24)
 - `check_diff(git, base, head)` / `check_branch(git, branch)` → 막는 이유 목록. HQ에서 하는 **모든 머지**(자동·버튼) 전에 `merge_pr`가 부름. 막히면 GitHub에서 사람이 직접 머지해야 함
   - DB 파일(`*.sqlite3` · `*.db`) 추가
   - Indexing API 호출(`indexing.googleapis.com` · `urlNotifications`) 추가
