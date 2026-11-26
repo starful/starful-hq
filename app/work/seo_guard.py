@@ -135,6 +135,8 @@ def screen_worktree(repo) -> list[tuple[str, str]]:
             continue
         if code.strip() == "M":
             old = git("show", f"HEAD:{path}").stdout
+            if old and lang_problem(path, old) and not lang_problem(path, new):
+                continue   # a repair: the page was in the wrong language and now matches its own (2026-11-26)
             why = page_problem(_body(old) if old else "", _body(new)) if old else ""
             why = why or lang_problem(path, new)
             if why:
