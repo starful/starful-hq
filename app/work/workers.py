@@ -2199,14 +2199,28 @@ def translate_ba_ja(work, rels: list[str] | None = None) -> str:
                 if cand.is_file():
                     paths.append(cand)
                     break
+    # One PR must pass the merge guard (existing pages · title changes), so translate only what fits.
+    # Translations done earlier but not shipped wait in data/ba_ja_ready/ and are used first (no tokens).
+    from app.work import seo_guard
+    left, changed = seo_guard.edit_budget()
+    if left <= 0:
+        raise RuntimeError(f"고친 기존 페이지 {changed}개가 아직 PR 전이에요 · PR이 머지된 뒤 이어서 옮겨요")
     if not paths:
-        paths = g.list_en_data_analysis(limit=8)
+        paths = g.list_en_data_analysis(limit=left)
+    paths = paths[:left]
     if not paths:
         raise RuntimeError("일본어로 바꿀 영어 BA 초안이 없어요")
+    ready_dir = sites.ROOT / "data" / "ba_ja_ready"
     done, failed = [], []
     for n, path in enumerate(paths, 1):
         work.say(f"{n}/{len(paths)} · {path.name} 일본어로 옮기는 중")
         try:
+            ready = ready_dir / path.name
+            if ready.is_file():
+                path.write_text(ready.read_text(encoding="utf-8"), encoding="utf-8")
+                ready.unlink()
+                done.append(path.name)
+                continue
             out = g.translate_data_analysis_to_ja(path)
             done.append(out.name)
         except Exception as exc:  # noqa: BLE001
