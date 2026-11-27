@@ -62,6 +62,18 @@ def _reload_when_idle() -> None:
                 told = True
             continue
         time.sleep(1)   # let an editor finish writing
+        import py_compile
+        broken = []
+        for path, mt in _mtimes().items():
+            if base.get(path) != mt:
+                try:
+                    py_compile.compile(path, doraise=True)
+                except py_compile.PyCompileError as exc:
+                    broken.append(f"{Path(path).name}: {str(exc).splitlines()[-1][:120]}")
+        if broken:   # a half-saved / broken file must not take HQ down: keep the running server
+            print(f"code changed but does not compile · staying up · {broken[0]}", flush=True)
+            base = _mtimes()
+            continue
         print("code changed · no job running · restarting HQ", flush=True)
         os.execv(sys.executable, [sys.executable, "-m", "app"])
 
